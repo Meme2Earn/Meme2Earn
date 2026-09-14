@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.pnpm-store/
+.chrome-runtime-check/
+*.log
+*.local
+preview-fixed.png
