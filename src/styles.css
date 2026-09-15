@@ -5,8 +5,8 @@
 @tailwind utilities;
 
 :root {
-  color: #f5f1e6;
-  background: #000;
+  color: #1e151a;
+  background: #fff;
   font-family: "Space Grotesk", sans-serif;
 }
 
@@ -18,9 +18,16 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  background: #000;
+  background: #fff;
 }
-
+.app-background {
+  background-color: #fff;
+  background-image: linear-gradient(rgba(255, 255, 255, 0.76), rgba(255, 255, 255, 0.84)), url("./assets/m2e_pink_wave_uniform_smooth_v3.svg");
+  background-position: top center;
+  background-repeat: no-repeat;
+  background-size: cover, cover;
+  background-attachment: fixed;
+}
 button,
 input,
 textarea,
@@ -39,3 +46,6 @@ select:focus-visible {
 ::selection {
   background: rgba(255, 62, 160, 0.35);
 }
+
+
+

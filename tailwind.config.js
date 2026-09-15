@@ -4,16 +4,16 @@ export default {
   theme: {
     extend: {
       colors: {
-        ink: "#000000",
-        surface: "#1E1A14",
-        raised: "#241F18",
-        line: "#2E2A21",
-        text: "#F5F1E6",
-        muted: "#9C9284",
-        mutedFaint: "#6B6356",
+        ink: "#FFFFFF",
+        surface: "#FFFFFF",
+        raised: "#FFF5FA",
+        line: "#E7D5DF",
+        text: "#1E151A",
+        muted: "#6F6269",
+        mutedFaint: "#9B8F96",
         pink: "#FF3EA0",
-        gold: "#FFCF3F",
-        lime: "#7ED957",
+        gold: "#B77900",
+        lime: "#2F9E44",
         cyan: "#4FD1E8",
         orange: "#FF7A45",
       },
@@ -26,3 +26,5 @@ export default {
   },
   plugins: [],
 };
+
+

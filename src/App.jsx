@@ -341,11 +341,11 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-ink font-body text-text">
+    <div className="app-background min-h-screen bg-ink font-body text-text">
       <header className="sticky top-0 z-30 border-b border-line/80 bg-ink/88 backdrop-blur">
         <nav className="mx-auto flex min-h-16 max-w-7xl flex-col gap-3 px-4 py-3 sm:px-6 lg:h-16 lg:flex-row lg:items-center lg:justify-between lg:px-8 lg:py-0">
-          <button className="font-display text-2xl font-bold tracking-normal text-text" type="button" onClick={() => setPage("Explore")}>
-            meme<span className="text-pink">2</span>earn
+          <button className="inline-flex items-center" type="button" onClick={() => setPage("Explore")} aria-label="meme2earn home">
+            <img className="h-10 w-auto" src="/favicon.svg" alt="" />
           </button>
 
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -1171,3 +1171,7 @@ function Field({ label, error, children }) {
 }
 
 export default App;
+
+
+
+
