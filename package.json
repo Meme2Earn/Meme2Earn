@@ -3,21 +3,30 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
-    "preview": "vite preview --host 0.0.0.0"
+    "preview": "vite preview --host 0.0.0.0",
+    "contracts:compile": "hardhat compile",
+    "deploy:robinhood-testnet": "hardhat run scripts/deploy-dare-escrow.js --network robinhoodTestnet"
   },
   "dependencies": {
+    "@openzeppelin/contracts": "^5.6.1",
+    "@privy-io/react-auth": "^3.42.0",
     "@vitejs/plugin-react": "^4.3.4",
-    "vite": "^5.4.11",
+    "autoprefixer": "latest",
+    "ethers": "^6.17.0",
+    "lucide-react": "latest",
     "react": "latest",
     "react-dom": "latest",
     "tailwindcss": "^3.4.17",
-    "autoprefixer": "latest",
-    "lucide-react": "latest"
+    "vite": "^5.4.11"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
       "esbuild"
     ]
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^6.1.2",
+    "dotenv": "^17.4.2",
+    "hardhat": "^2.28.0"
+  }
 }

@@ -1,7 +1,11 @@
 node_modules/
 dist/
+artifacts/
+cache/
 .pnpm-store/
 .chrome-runtime-check/
+.env
+supabase/.temp/
 *.log
 *.local
 preview-fixed.png
