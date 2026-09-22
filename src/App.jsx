@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
   Check,
   CircleAlert,
+  ChevronsUpDown,
   ChevronRight,
   Clock3,
   Compass,
@@ -598,6 +599,11 @@ function App({ auth }) {
       setPage("SetupProfile");
     }
   }, [accountLoaded, authenticated, page, profileComplete, ready, termsAccepted]);
+
+  useEffect(() => {
+    if (!ready || !authenticated || !accountLoaded || !profileComplete) return;
+    if (page === "Landing") setPage("Explore");
+  }, [accountLoaded, authenticated, page, profileComplete, ready]);
 
   const xProfile = useMemo(() => (authenticated ? getXProfile(user) : null), [authenticated, user]);
   const effectiveProfile = useMemo(
@@ -1221,7 +1227,7 @@ function App({ auth }) {
     }
     writeStoredAccount(userStorageKey, { profile: nextProfile, profileComplete: true, termsAccepted: true });
     setProfileComplete(true);
-    setPage("Profile");
+    setPage("Explore");
   }
 
   function handleLoginClick() {
@@ -1843,7 +1849,7 @@ function CreatePage({ bountySyncStatus, errors, form, onChange, onImageChange, o
 
         <div className="border border-line bg-surface p-4">
           <p className="mb-3 text-xs font-bold uppercase tracking-[0.13em] text-muted">Funding type</p>
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid grid-cols-2 gap-3">
             {FUNDING_TYPES.map((type) => (
               <label key={type.value} className={`funding-option ${form.fundingType === type.value ? "is-selected" : ""}`}>
                 <input
@@ -1956,10 +1962,10 @@ function CreatePage({ bountySyncStatus, errors, form, onChange, onImageChange, o
           ) : null}
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 min-[540px]:grid-cols-2">
           <Field label="Category">
             <select
-              className="h-11 w-full border border-line bg-surface px-3 text-sm text-text"
+              className="h-11 w-full rounded-full border border-[#F4B6D7] bg-white px-4 text-sm text-text"
               value={form.category}
               onChange={(event) => onChange({ ...form, category: event.target.value })}
             >
@@ -1970,7 +1976,7 @@ function CreatePage({ bountySyncStatus, errors, form, onChange, onImageChange, o
           </Field>
           <Field label="Deadline">
             <input
-              className="h-11 w-full border border-line bg-surface px-3 font-mono text-sm text-text"
+              className="h-11 w-full rounded-full border border-[#F4B6D7] bg-white px-4 font-mono text-sm text-text"
               type="date"
               value={form.deadline}
               onChange={(event) => onChange({ ...form, deadline: event.target.value })}
@@ -1981,21 +1987,22 @@ function CreatePage({ bountySyncStatus, errors, form, onChange, onImageChange, o
         <div>
           <div>
             <p className="mb-2 text-xs font-bold uppercase tracking-[0.13em] text-muted">Bounty amount</p>
-            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_13rem] sm:gap-0">
+            <div className="grid grid-cols-1 gap-3 min-[540px]:grid-cols-2">
               <input
-                className="h-11 w-full border border-line bg-surface px-3 font-mono text-sm text-text"
+                className="h-11 w-full rounded-full border border-[#F4B6D7] bg-white px-4 font-mono text-sm text-text"
                 min={minimumReward}
+                placeholder="0.00"
                 step="any"
                 type="number"
                 value={form.reward}
                 onChange={(event) => onChange({ ...form, reward: event.target.value })}
               />
-              <div className="flex h-11 items-center border border-line bg-surface sm:border-l-0">
-                <div className="pl-3">
+              <div className="relative flex h-11 items-center rounded-full border border-[#F4B6D7] bg-white">
+                <div className="pl-4">
                   <TokenLogo token={form.coin} size="sm" />
                 </div>
                 <select
-                  className="h-full min-w-0 flex-1 bg-transparent px-3 font-mono text-sm font-bold text-gold outline-none"
+                  className="h-full min-w-0 flex-1 appearance-none bg-transparent px-3 pr-9 font-mono text-sm font-bold text-gold outline-none"
                   value={form.coin}
                   onChange={(event) => onChange({ ...form, coin: event.target.value })}
                 >
@@ -2005,6 +2012,7 @@ function CreatePage({ bountySyncStatus, errors, form, onChange, onImageChange, o
                     </option>
                   ))}
                 </select>
+                <ChevronsUpDown className="pointer-events-none absolute right-4 text-muted" size={16} aria-hidden="true" />
               </div>
             </div>
             <p className="mt-2 font-mono text-xs text-muted">Minimum: {minimumReward} ${form.coin}</p>
