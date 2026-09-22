@@ -1,12 +1,12 @@
 import { ethers } from "ethers";
 
 export const ROBINHOOD_TESTNET = {
-  chainId: 46630,
-  chainIdHex: "0xb626",
-  name: "Robinhood Testnet",
+  chainId: 4663,
+  chainIdHex: "0x1237",
+  name: "Robinhood Chain",
   nativeCurrency: { decimals: 18, name: "Ether", symbol: "ETH" },
-  rpcUrls: ["https://rpc.testnet.chain.robinhood.com"],
-  blockExplorerUrls: ["https://explorer.testnet.chain.robinhood.com"],
+  rpcUrls: ["https://rpc.mainnet.chain.robinhood.com"],
+  blockExplorerUrls: ["https://robinhoodchain.blockscout.com"],
 };
 
 export const DARE_ESCROW_ADDRESS = import.meta.env.VITE_DARE_ESCROW_ADDRESS || "";
@@ -173,7 +173,7 @@ export async function transferToken({ amount: displayAmount, recipient, tokenAdd
   const provider = signer.provider;
   const code = await provider.getCode(tokenAddress);
   if (code === "0x") {
-    throw new Error("This token is not available on Robinhood Testnet.");
+    throw new Error("This token is not available on Robinhood Chain.");
   }
 
   const { amount, token } = await getTokenAmount(tokenAddress, signer, displayAmount);
@@ -226,8 +226,8 @@ export async function createBountyEscrow({ bounty, wallet }) {
     signer.provider.getCode(bounty.tokenAddress),
   ]);
 
-  if (escrowCode === "0x") throw new Error("The escrow contract is not available on Robinhood Testnet.");
-  if (tokenCode === "0x") throw new Error(`${bounty.coin || "This token"} is not available on Robinhood Testnet.`);
+  if (escrowCode === "0x") throw new Error("The escrow contract is not available on Robinhood Chain.");
+  if (tokenCode === "0x") throw new Error(`${bounty.coin || "This token"} is not available on Robinhood Chain.`);
 
   const [escrowPaused, tokenSupported] = await Promise.all([
     escrow.paused(),
@@ -310,7 +310,7 @@ export async function finalizeBountyEscrow({ bounty, wallet, winner }) {
   const signerAddress = await signer.getAddress();
   const escrowAddress = bounty.escrowAddress || DARE_ESCROW_ADDRESS;
   const escrowCode = await signer.provider.getCode(escrowAddress);
-  if (escrowCode === "0x") throw new Error("The escrow contract is not available on Robinhood Testnet.");
+  if (escrowCode === "0x") throw new Error("The escrow contract is not available on Robinhood Chain.");
 
   const escrow = new ethers.Contract(escrowAddress, ESCROW_ABI, signer);
   const [state, latestBlock] = await Promise.all([

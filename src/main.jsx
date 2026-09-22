@@ -6,9 +6,9 @@ import "./styles.css";
 
 const privyAppId = import.meta.env.VITE_PRIVY_APP_ID;
 const hasPrivyAppId = Boolean(privyAppId && privyAppId !== "your_privy_app_id_here");
-const robinhoodTestnet = {
-  id: 46630,
-  name: "Robinhood Testnet",
+const robinhoodMainnet = {
+  id: 4663,
+  name: "Robinhood Chain",
   nativeCurrency: {
     decimals: 18,
     name: "Ether",
@@ -16,16 +16,16 @@ const robinhoodTestnet = {
   },
   rpcUrls: {
     default: {
-      http: ["https://rpc.testnet.chain.robinhood.com"],
+      http: ["https://rpc.mainnet.chain.robinhood.com"],
     },
   },
   blockExplorers: {
     default: {
-      name: "Robinhood Testnet Explorer",
-      url: "https://explorer.testnet.chain.robinhood.com",
+      name: "Robinhood Chain Explorer",
+      url: "https://robinhoodchain.blockscout.com",
     },
   },
-  testnet: true,
+  testnet: false,
 };
 
 function PrivyConnectedApp() {
@@ -65,8 +65,8 @@ createRoot(document.getElementById("root")).render(
       <PrivyProvider
         appId={privyAppId}
         config={{
-          defaultChain: robinhoodTestnet,
-          supportedChains: [robinhoodTestnet],
+          defaultChain: robinhoodMainnet,
+          supportedChains: [robinhoodMainnet],
           loginMethods: ["twitter"],
           embeddedWallets: {
             ethereum: {

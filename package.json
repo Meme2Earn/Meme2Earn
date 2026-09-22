@@ -2,10 +2,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
+    "start": "node server/index.js",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
     "contracts:compile": "hardhat compile",
     "deploy:robinhood-testnet": "hardhat run scripts/deploy-dare-escrow.js --network robinhoodTestnet",
+    "deploy:robinhood-mainnet": "hardhat run scripts/deploy-dare-escrow.js --network robinhoodMainnet",
     "deploy:test-token": "hardhat run scripts/deploy-test-token.js --network robinhoodTestnet"
   },
   "dependencies": {

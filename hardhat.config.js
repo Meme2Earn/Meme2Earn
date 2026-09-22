@@ -5,6 +5,7 @@ dotenv.config();
 
 const privateKey = process.env.DEPLOYER_PRIVATE_KEY || process.env.PRIVATE_KEY || "";
 const robinhoodTestnetRpc = process.env.RH_RPC_URL || "https://rpc.testnet.chain.robinhood.com";
+const robinhoodMainnetRpc = process.env.RH_MAINNET_RPC_URL || "https://rpc.mainnet.chain.robinhood.com";
 
 export default {
   solidity: {
@@ -22,6 +23,11 @@ export default {
       chainId: 46630,
       accounts: privateKey ? [privateKey] : [],
     },
+    robinhoodMainnet: {
+      url: robinhoodMainnetRpc,
+      chainId: 4663,
+      accounts: privateKey ? [privateKey] : [],
+    },
   },
   etherscan: {
     apiKey: {
@@ -34,6 +40,14 @@ export default {
         urls: {
           apiURL: "https://explorer.testnet.chain.robinhood.com/api/",
           browserURL: "https://explorer.testnet.chain.robinhood.com/",
+        },
+      },
+      {
+        network: "robinhoodMainnet",
+        chainId: 4663,
+        urls: {
+          apiURL: "https://robinhoodchain.blockscout.com/api",
+          browserURL: "https://robinhoodchain.blockscout.com/",
         },
       },
     ],

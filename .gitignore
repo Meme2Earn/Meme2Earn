@@ -9,3 +9,5 @@ supabase/.temp/
 *.log
 *.local
 preview-fixed.png
+
+.vercel

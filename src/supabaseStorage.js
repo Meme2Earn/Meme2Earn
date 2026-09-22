@@ -1,7 +1,12 @@
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-const profileFunctionUrl = import.meta.env.VITE_SUPABASE_PROFILE_FUNCTION_URL;
-const marketplaceFunctionUrl = import.meta.env.VITE_SUPABASE_MARKETPLACE_FUNCTION_URL;
+const backendUrl = import.meta.env.VITE_BACKEND_URL?.replace(/\/$/, "");
+const profileFunctionUrl = backendUrl
+  ? `${backendUrl}/api/profile`
+  : import.meta.env.VITE_SUPABASE_PROFILE_FUNCTION_URL;
+const marketplaceFunctionUrl = backendUrl
+  ? `${backendUrl}/api/marketplace`
+  : import.meta.env.VITE_SUPABASE_MARKETPLACE_FUNCTION_URL;
 const bountyImageBucket = "bounty-images";
 const submissionVideoBucket = "submission-videos";
 

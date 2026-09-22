@@ -7,6 +7,7 @@ import {
   ExternalLink,
   LayoutDashboard,
   LoaderCircle,
+  Menu,
   Plus,
   RefreshCw,
   Search,
@@ -378,6 +379,7 @@ function App({ auth }) {
   const [errors, setErrors] = useState({});
   const [bountySyncStatus, setBountySyncStatus] = useState("");
   const [marketStatus, setMarketStatus] = useState("");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [profile, setProfile] = useState(blankProfile);
   const [profileComplete, setProfileComplete] = useState(false);
   const [profileStatus, setProfileStatus] = useState("");
@@ -404,7 +406,7 @@ function App({ auth }) {
       try {
         const result = await fetchBounties();
         if (cancelled) return;
-        setBounties(result.bounties);
+        setBounties(result.bounties.filter((bounty) => bounty.escrowAddress === DARE_ESCROW_ADDRESS));
         setBountySyncStatus("");
       } catch (error) {
         if (cancelled) return;
@@ -597,6 +599,10 @@ function App({ auth }) {
       setProfileStatus("Profile details were filled from X. You can edit them before saving.");
     }
   }, [authenticated, ready, user, userStorageKey, xProfilePrefilled]);
+
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [page]);
 
   const filteredBounties = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -1212,13 +1218,13 @@ function App({ auth }) {
   return (
     <div className="app-background min-h-screen bg-ink font-body text-text">
       <header className="sticky top-0 z-30 border-b border-line/80 bg-ink/88 backdrop-blur">
-        <nav className="mx-auto flex min-h-16 max-w-7xl flex-col gap-3 px-4 py-3 sm:px-6 lg:h-16 lg:flex-row lg:items-center lg:justify-between lg:px-8 lg:py-0">
-          <button className="inline-flex items-center self-start" type="button" onClick={() => setPage("Landing")} aria-label="meme2earn home">
+        <nav className="mx-auto flex min-h-16 max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:h-16 lg:flex-nowrap lg:px-8 lg:py-0">
+          <button className="inline-flex items-center" type="button" onClick={() => setPage("Landing")} aria-label="meme2earn home">
             <img className="h-10 w-auto" src="/favicon.svg" alt="" />
           </button>
 
-          <div className="flex w-full min-w-0 flex-col gap-3 sm:flex-row sm:items-center lg:w-auto">
-            <div className="flex max-w-full overflow-x-auto border border-line bg-surface p-1">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <div className="hidden max-w-full overflow-x-auto border border-line bg-surface p-1 lg:flex">
               {PAGES.map((navPage) => (
                 <button
                   key={navPage}
@@ -1237,7 +1243,17 @@ function App({ auth }) {
               ))}
             </div>
             <button
-              className="inline-flex h-10 w-full items-center justify-center gap-2 border border-line bg-transparent px-4 text-sm font-medium text-text transition hover:border-pink hover:text-pink sm:w-auto"
+              className="inline-flex h-10 w-10 items-center justify-center border border-line text-text transition hover:border-pink hover:text-pink lg:hidden"
+              type="button"
+              aria-label={mobileNavOpen ? "Close navigation" : "Open navigation"}
+              aria-expanded={mobileNavOpen}
+              aria-controls="mobile-navigation"
+              onClick={() => setMobileNavOpen((open) => !open)}
+            >
+              {mobileNavOpen ? <X size={19} /> : <Menu size={19} />}
+            </button>
+            <button
+              className="inline-flex h-10 items-center justify-center gap-2 border border-line bg-transparent px-3 text-sm font-medium text-text transition hover:border-pink hover:text-pink sm:px-4"
               type="button"
               onClick={handleHeaderAuthClick}
             >
@@ -1245,6 +1261,26 @@ function App({ auth }) {
               {connected ? truncateAddress(walletAddress) : "Login"}
             </button>
           </div>
+          {mobileNavOpen ? (
+            <div id="mobile-navigation" className="grid w-full border border-line bg-surface p-1 lg:hidden">
+              {PAGES.map((navPage) => (
+                <button
+                  key={navPage}
+                  className={`flex h-11 items-center gap-3 px-3 text-left text-sm font-bold transition ${
+                    page === navPage ? "bg-pink text-ink" : "text-text hover:bg-raised"
+                  }`}
+                  type="button"
+                  onClick={() => setPage(navPage)}
+                >
+                  {navPage === "Explore" && <Compass size={17} />}
+                  {navPage === "M2E TV" && <LayoutDashboard size={17} />}
+                  {navPage === "Create" && <Plus size={17} />}
+                  {navPage === "Profile" && <User size={17} />}
+                  {navPage}
+                </button>
+              ))}
+            </div>
+          ) : null}
         </nav>
       </header>
 
@@ -1436,11 +1472,7 @@ function LandingPage({ bounties, bountiesLoading, stats, onCreate, onExplore }) 
 
         <div className="space-y-6">
           <div className="border-y border-line bg-white/72 py-6 backdrop-blur-sm">
-            <div className="grid grid-cols-1 min-[420px]:grid-cols-3">
-              <Stat label="Open dares" value={stats.open} loading={bountiesLoading} />
-              <Stat label="Coins in play" value={stats.coins} loading={bountiesLoading} />
-              <Stat label="Active hunters" value={stats.hunters} loading={bountiesLoading} />
-            </div>
+            <CampaignStats stats={stats} loading={bountiesLoading} />
           </div>
           <div className="grid gap-4 border-y border-line py-5 sm:grid-cols-2">
             <div>
@@ -1617,11 +1649,7 @@ function ExplorePage({
           </p>
         </div>
 
-        <div className="grid grid-cols-1 min-[420px]:grid-cols-3">
-          <Stat label="Open dares" value={stats.open} loading={bountiesLoading} />
-          <Stat label="Coins in play" value={stats.coins} loading={bountiesLoading} />
-          <Stat label="Active hunters" value={stats.hunters} loading={bountiesLoading} />
-        </div>
+        <CampaignStats stats={stats} loading={bountiesLoading} />
       </section>
 
       <section className="py-6">
@@ -2861,6 +2889,27 @@ function CreatorSubmissionRow({ bounty, creatorDecides, onSelectWinner, selected
 function Stat({ label, loading = false, value }) {
   return (
     <div className="min-w-0 border-b border-line px-4 py-4 last:border-b-0 min-[420px]:border-b-0 min-[420px]:border-r min-[420px]:py-1 min-[420px]:last:border-r-0 sm:px-6">
+      <p className="break-words font-mono text-3xl font-bold text-pink sm:text-4xl" aria-busy={loading}>
+        <AnimatedNumber value={loading ? 0 : value} />
+      </p>
+      <p className="mt-2 text-xs font-bold uppercase tracking-[0.13em] text-muted">{label}</p>
+    </div>
+  );
+}
+
+function CampaignStats({ loading = false, stats }) {
+  return (
+    <div className="flex flex-col min-[600px]:flex-row">
+      <CampaignStat label="Open dares" value={stats.open} loading={loading} />
+      <CampaignStat label="Coins in play" value={stats.coins} loading={loading} />
+      <CampaignStat label="Active hunters" value={stats.hunters} loading={loading} />
+    </div>
+  );
+}
+
+function CampaignStat({ label, loading = false, value }) {
+  return (
+    <div className="min-w-0 border-b border-line px-5 py-4 text-center last:border-b-0 min-[600px]:flex-1 min-[600px]:border-b-0 min-[600px]:border-l min-[600px]:first:border-l-0 sm:px-6">
       <p className="break-words font-mono text-3xl font-bold text-pink sm:text-4xl" aria-busy={loading}>
         <AnimatedNumber value={loading ? 0 : value} />
       </p>

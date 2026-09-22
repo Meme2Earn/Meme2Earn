@@ -11,16 +11,21 @@ const SUPPORTED_TOKENS = [
 ];
 
 const testTokenAddress = process.env.TEST_TOKEN_ADDRESS || process.env.VITE_TEST_TOKEN_ADDRESS || "";
-if (testTokenAddress) {
-  SUPPORTED_TOKENS.push(["M2ET", testTokenAddress]);
-}
 
 async function main() {
   const { ethers } = hre;
   const [deployer] = await ethers.getSigners();
-  const admin = process.env.ESCROW_ADMIN || deployer.address;
-  const feeRecipient = process.env.CREATOR_FEE_RECIPIENT || admin;
-  const finalizer = process.env.ESCROW_FINALIZER || "";
+  const isMainnet = hre.network.name === "robinhoodMainnet";
+  const supportedTokens = [...SUPPORTED_TOKENS];
+  if (!isMainnet && testTokenAddress) {
+    supportedTokens.push(["M2ET", testTokenAddress]);
+  }
+  const admin = isMainnet ? deployer.address : process.env.ESCROW_ADMIN || deployer.address;
+  const feeRecipient = isMainnet ? deployer.address : process.env.CREATOR_FEE_RECIPIENT || admin;
+  const finalizer = isMainnet ? deployer.address : process.env.ESCROW_FINALIZER || "";
+  const explorerBaseUrl = isMainnet
+    ? "https://robinhoodchain.blockscout.com"
+    : "https://explorer.testnet.chain.robinhood.com";
 
   console.log("Network:", hre.network.name);
   console.log("Deployer:", deployer.address);
@@ -42,13 +47,13 @@ async function main() {
     console.log("Granted FINALIZER_ROLE:", finalizer);
   }
 
-  for (const [symbol, address] of SUPPORTED_TOKENS) {
+  for (const [symbol, address] of supportedTokens) {
     const tx = await escrow.setSupportedToken(address, true);
     await tx.wait();
     console.log("Supported token:", symbol, address);
   }
 
-  console.log("Explorer:", `https://explorer.testnet.chain.robinhood.com/address/${escrowAddress}`);
+  console.log("Explorer:", `${explorerBaseUrl}/address/${escrowAddress}`);
 }
 
 main().catch((error) => {
