@@ -162,7 +162,10 @@ Deno.serve(async (request) => {
       return jsonResponse({ id: privyUserId, termsAccepted: true });
     }
 
-    const username = String(formData.get("username") || "").trim();
+    const existingProfile = await getProfile(privyUserId);
+    const submittedUsername = String(formData.get("username") || "").trim();
+    // X identity is set once during onboarding and cannot be changed by later client requests.
+    const username = String(existingProfile?.username || "").trim() || submittedUsername;
     const walletAddress = String(formData.get("walletAddress") || "").trim();
     const currentAvatarUrl = String(formData.get("currentAvatarUrl") || "").trim();
     const avatar = formData.get("avatar");

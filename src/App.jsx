@@ -264,6 +264,21 @@ function formatReward(value) {
 function formatTokenBalance(value) {
   const numericValue = Number(value);
   if (!Number.isFinite(numericValue)) return "0.00";
+
+  const absoluteValue = Math.abs(numericValue);
+  const compactUnit = absoluteValue >= 1_000_000_000
+    ? [1_000_000_000, "b"]
+    : absoluteValue >= 1_000_000
+      ? [1_000_000, "m"]
+      : absoluteValue >= 1_000
+        ? [1_000, "k"]
+        : null;
+
+  if (compactUnit) {
+    const [divisor, suffix] = compactUnit;
+    return `${new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 }).format(numericValue / divisor)}${suffix}`;
+  }
+
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits: numericValue >= 1 ? 4 : 8,
     minimumFractionDigits: 2,
@@ -329,6 +344,20 @@ function findXAccount(user) {
   });
 }
 
+function getHighResolutionXAvatar(avatar) {
+  if (!avatar) return avatar;
+
+  try {
+    const url = new URL(avatar);
+    if (!/(^|\.)twimg\.com/i.test(url.hostname)) return avatar;
+    url.pathname = url.pathname.replace(/_(?:normal|bigger|mini)(?=\.[a-z0-9]+$)/i, "_400x400");
+    if (url.searchParams.get("name") === "small") url.searchParams.set("name", "large");
+    return url.toString();
+  } catch {
+    return avatar;
+  }
+}
+
 function getXProfile(user) {
   const account = findXAccount(user);
   if (!account) return null;
@@ -340,14 +369,14 @@ function getXProfile(user) {
     account.name,
     account.displayName,
   ).replace(/^@/, "");
-  const avatar = firstValue(
+  const avatar = getHighResolutionXAvatar(firstValue(
     account.profilePictureUrl,
     account.profilePicture,
     account.profileImageUrl,
     account.avatarUrl,
     account.picture,
     account.imageUrl,
-  );
+  ));
 
   if (!username && !avatar) return null;
   return { avatar, username };
@@ -596,7 +625,7 @@ function App({ auth }) {
     setXProfilePrefilled(true);
 
     if (xProfile.username || xProfile.avatar) {
-      setProfileStatus("Profile details were filled from X. You can edit them before saving.");
+      setProfileStatus("Profile details were filled from X.");
     }
   }, [authenticated, ready, user, userStorageKey, xProfilePrefilled]);
 
@@ -1377,7 +1406,6 @@ function App({ auth }) {
           <SetupProfilePage
             profile={effectiveProfile}
             status={profileStatus}
-            onChange={setProfile}
             onSubmit={handleSetProfile}
           />
         )}
@@ -2042,7 +2070,7 @@ function TermsPage({ onAccept, status = "" }) {
   );
 }
 
-function SetupProfilePage({ profile, status, onChange, onSubmit }) {
+function SetupProfilePage({ profile, status, onSubmit }) {
   return (
     <section className="grid gap-8 lg:grid-cols-[0.85fr_1.15fr]">
       <div className="border-b border-line pb-8 lg:border-b-0 lg:border-r lg:pr-8">
@@ -2052,7 +2080,7 @@ function SetupProfilePage({ profile, status, onChange, onSubmit }) {
         </p>
         <h1 className="font-display text-4xl font-bold leading-tight text-text sm:text-6xl">Create your hunter profile.</h1>
         <p className="mt-5 max-w-xl text-base leading-7 text-muted">
-          Confirm the name and profile image from your X account before joining or posting bounties.
+          Your name and profile image are taken directly from your X account before you join or post dares.
         </p>
       </div>
 
@@ -2078,11 +2106,9 @@ function SetupProfilePage({ profile, status, onChange, onSubmit }) {
         ) : null}
 
         <Field label="Username">
-          <input
-            className="h-11 w-full border border-line bg-surface px-3 text-sm text-text"
-            value={profile.username}
-            onChange={(event) => onChange({ ...profile, username: event.target.value })}
-          />
+          <div className="flex h-11 items-center border border-line bg-surface px-3 text-sm font-bold text-text">
+            {profile.username ? `@${profile.username.replace(/^@/, "")}` : "No X username available"}
+          </div>
         </Field>
 
         <button
@@ -2517,29 +2543,33 @@ function ProfilePage({
               </button>
             </div>
 
-            <div className="mb-5 grid border border-line bg-surface sm:grid-cols-3">
-              <div className="border-b border-line px-4 py-4 sm:border-b-0 sm:border-r">
+            <div className="mb-5">
+              <div className="grid grid-cols-3 border border-line bg-surface">
+              <div className="min-w-0 border-r border-line px-2 py-4 text-center sm:px-4">
                 <p className="text-xs font-bold uppercase tracking-[0.13em] text-mutedFaint">Selected token</p>
-                <div className="mt-2 flex min-w-0 items-center gap-3">
+                <div className="mt-2 flex min-w-0 items-center justify-center gap-2 sm:gap-3">
                   <TokenLogo token={sendForm.token} />
-                  <p className="break-words font-mono text-2xl font-bold text-text">{sendForm.token}</p>
+                  <p className="break-words font-mono text-base font-bold text-text sm:text-2xl">{sendForm.token}</p>
                 </div>
               </div>
-              <div className="border-b border-line px-4 py-4 sm:border-b-0 sm:border-r">
+              <div className="min-w-0 border-r border-line px-2 py-4 text-center sm:px-4">
                 <p className="text-xs font-bold uppercase tracking-[0.13em] text-mutedFaint">Available balance</p>
-                <p className="mt-2 break-words font-mono text-2xl font-bold text-gold">
+                <p className="mt-2 break-words font-mono text-base font-bold text-gold sm:text-2xl">
                   {walletBalancesLoading ? "Loading..." : selectedTokenBalanceLabel}
                 </p>
-                {walletBalancesError ? (
-                  <p className="mt-2 text-xs leading-5 text-muted">{walletBalancesError}</p>
-                ) : null}
               </div>
-              <div className="px-4 py-4">
+              <div className="min-w-0 px-2 py-4 text-center sm:px-4">
                 <p className="text-xs font-bold uppercase tracking-[0.13em] text-mutedFaint">Wallet</p>
-                <p className="mt-2 font-mono text-sm font-bold text-muted">
+                <p className="mt-2 truncate font-mono text-xs font-bold text-muted sm:text-sm">
                   {walletAddress ? truncateAddress(walletAddress) : "Pending"}
                 </p>
               </div>
+              </div>
+              {walletBalancesError ? (
+                <p className="border-x border-b border-line bg-surface px-3 py-2 text-center text-xs leading-5 text-muted">
+                  {walletBalancesError}
+                </p>
+              ) : null}
             </div>
 
             <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
