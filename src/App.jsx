@@ -4,9 +4,11 @@ import {
   Clock3,
   Compass,
   Copy,
+  ExternalLink,
   LayoutDashboard,
   LoaderCircle,
   Plus,
+  RefreshCw,
   Search,
   Send,
   Sparkles,
@@ -44,6 +46,8 @@ import {
   finalizeBountyEscrow,
   fundBountyEscrow,
   getTokenBalance,
+  getTransactionExplorerUrl,
+  getTransactionStatus,
   transferToken,
 } from "./escrowClient.js";
 
@@ -101,6 +105,15 @@ const TOKEN_CONTRACTS = Object.fromEntries(
   Object.entries(TOKEN_METADATA).map(([token, metadata]) => [token, metadata.contract]),
 );
 const TOKEN_OPTIONS = Object.keys(TOKEN_METADATA);
+const DARE_MINIMUM_REWARDS = {
+  USDG: 100,
+  PONS: 167,
+  CASHCAT: 619,
+  ARTIFICIAL_INU: 406,
+  MSFT: 0.2,
+  AAPL: 0.3,
+  NVDA: 0.45,
+};
 const CONTAINED_LOGO_TOKENS = new Set(["USDG", "AAPL", "MSFT"]);
 const FUNDING_TYPES = [
   {
@@ -267,6 +280,10 @@ function getTokenAddress(token) {
 
 function getTokenLogoUrl(token) {
   return TOKEN_METADATA[token]?.logo || "";
+}
+
+function getMinimumDareReward(token) {
+  return DARE_MINIMUM_REWARDS[token] || 1;
 }
 
 function getDaysLeft(dateValue) {
@@ -1049,13 +1066,16 @@ function App({ auth }) {
     event.preventDefault();
     const nextErrors = {};
     const reward = Number(form.reward);
+    const minimumReward = getMinimumDareReward(form.coin);
 
     if (!connected) nextErrors.form = "Login to post a bounty.";
     if (connected && !walletAddress) nextErrors.form = "Your wallet is still being created. Try again in a moment.";
     if (connected && walletAddress && !selectedWallet) nextErrors.form = "Wallet provider is not ready. Try again in a moment.";
     if (!DARE_ESCROW_ADDRESS) nextErrors.form = "Escrow contract address is not configured.";
     if (!form.title.trim()) nextErrors.title = "Title is required.";
-    if (!reward || reward <= 0) nextErrors.reward = "Reward must be greater than 0.";
+    if (!reward || reward < minimumReward) {
+      nextErrors.reward = `Minimum bounty amount is ${minimumReward} ${form.coin}.`;
+    }
     if (!form.coin.trim()) nextErrors.coin = "Coin ticker is required.";
 
     setErrors(nextErrors);
@@ -1746,6 +1766,7 @@ function M2ETVPage({ items, onCreate, onOpenBounty }) {
 function CreatePage({ bountySyncStatus, errors, form, onChange, onImageChange, onSubmit }) {
   const creatorFee = form.fundingType === "Self-Funded Dare" ? calculateCreatorFee(form.reward) : 0;
   const totalLaunchAmount = (Number(form.reward) || 0) + creatorFee;
+  const minimumReward = getMinimumDareReward(form.coin);
 
   return (
     <section className="grid gap-8 lg:grid-cols-[0.85fr_1.15fr]">
@@ -1887,7 +1908,8 @@ function CreatePage({ bountySyncStatus, errors, form, onChange, onImageChange, o
             <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_13rem] sm:gap-0">
               <input
                 className="h-11 w-full border border-line bg-surface px-3 font-mono text-sm text-text"
-                min="1"
+                min={minimumReward}
+                step="any"
                 type="number"
                 value={form.reward}
                 onChange={(event) => onChange({ ...form, reward: event.target.value })}
@@ -1909,6 +1931,7 @@ function CreatePage({ bountySyncStatus, errors, form, onChange, onImageChange, o
                 </select>
               </div>
             </div>
+            <p className="mt-2 font-mono text-xs text-muted">Minimum: {minimumReward} ${form.coin}</p>
             {errors.reward || errors.coin ? (
               <p className="mt-2 text-sm text-pink">{errors.reward || errors.coin}</p>
             ) : null}
@@ -2069,6 +2092,51 @@ function ProfilePage({
     return totals;
   }, {});
   const earnedTokens = Object.entries(earnedByCoin);
+  const transactionHistory = useMemo(() => {
+    const entries = [];
+
+    postedBounties.forEach((bounty) => {
+      if (bounty.escrowTxHash) {
+        entries.push({
+          id: `created-${bounty.id}`,
+          label: bounty.fundingType === "Community-Funded Dare" ? "Escrow opened" : "Dare funded",
+          title: bounty.title,
+          reward: bounty.reward,
+          coin: bounty.coin,
+          hash: bounty.escrowTxHash,
+          timestamp: bounty.createdAt || "",
+        });
+      }
+
+      if (bounty.escrowFinalizeTxHash) {
+        entries.push({
+          id: `released-${bounty.id}`,
+          label: "Reward released",
+          title: bounty.title,
+          reward: bounty.reward,
+          coin: bounty.coin,
+          hash: bounty.escrowFinalizeTxHash,
+          timestamp: bounty.winnerSelectedAt || bounty.createdAt || "",
+        });
+      }
+    });
+
+    wonBounties.forEach((bounty) => {
+      if (bounty.escrowFinalizeTxHash) {
+        entries.push({
+          id: `earned-${bounty.id}`,
+          label: "Reward received",
+          title: bounty.title,
+          reward: bounty.reward,
+          coin: bounty.coin,
+          hash: bounty.escrowFinalizeTxHash,
+          timestamp: bounty.winnerSelectedAt || bounty.createdAt || "",
+        });
+      }
+    });
+
+    return entries.sort((left, right) => new Date(right.timestamp || 0) - new Date(left.timestamp || 0));
+  }, [postedBounties, wonBounties]);
   const [expandedBountyId, setExpandedBountyId] = useState(postedBounties[0]?.id || "");
   const [sendForm, setSendForm] = useState({
     recipient: "",
@@ -2084,6 +2152,9 @@ function ProfilePage({
   const [walletBalanceRefresh, setWalletBalanceRefresh] = useState(0);
   const [walletSending, setWalletSending] = useState(false);
   const [walletTransaction, setWalletTransaction] = useState(null);
+  const [transactionStates, setTransactionStates] = useState({});
+  const [transactionRefresh, setTransactionRefresh] = useState(0);
+  const [transactionsLoading, setTransactionsLoading] = useState(false);
   const selectedTokenBalance = walletBalances[sendForm.token] || "0.00";
   const selectedTokenBalanceLabel =
     selectedTokenBalance === "Unavailable" ? "Unavailable" : `${selectedTokenBalance} ${sendForm.token}`;
@@ -2139,6 +2210,30 @@ function ProfilePage({
       cancelled = true;
     };
   }, [walletAddress, walletBalanceRefresh, walletOpen]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const hashes = [...new Set(transactionHistory.map((entry) => entry.hash).filter(Boolean))];
+
+    async function loadTransactionStates() {
+      if (hashes.length === 0) {
+        setTransactionStates({});
+        return;
+      }
+
+      setTransactionsLoading(true);
+      const results = await Promise.all(hashes.map(async (hash) => [hash, await getTransactionStatus(hash)]));
+      if (!cancelled) {
+        setTransactionStates(Object.fromEntries(results));
+        setTransactionsLoading(false);
+      }
+    }
+
+    loadTransactionStates();
+    return () => {
+      cancelled = true;
+    };
+  }, [transactionHistory, transactionRefresh]);
 
   async function handleCopyAddress() {
     if (!walletAddress) return;
@@ -2247,6 +2342,16 @@ function ProfilePage({
           </button>
           {connected ? (
             <button
+              className="inline-flex h-11 items-center justify-center gap-2 border border-line px-5 text-sm font-bold text-text transition hover:border-pink hover:text-pink"
+              type="button"
+              onClick={() => setWalletOpen(true)}
+            >
+              <Wallet size={16} />
+              Wallet tools
+            </button>
+          ) : null}
+          {connected ? (
+            <button
               className="inline-flex h-11 items-center justify-center border border-line px-5 text-sm font-bold text-text transition hover:border-pink hover:text-pink"
               type="button"
               onClick={onLogout}
@@ -2291,26 +2396,73 @@ function ProfilePage({
         </div>
       </section>
 
-      <section className="flex flex-col gap-4 border-y border-line py-6 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="mb-3 inline-flex items-center gap-2 text-sm font-bold uppercase tracking-[0.16em] text-muted">
-            <Wallet size={16} className="text-pink" />
-            Wallet
-          </p>
-          <h2 className="font-display text-3xl font-bold text-text">Wallet tools</h2>
-          <p className="mt-2 font-mono text-sm font-bold text-muted">
-            {connected ? truncateAddress(walletAddress) : "Not connected"}
-          </p>
+      <section className="border-y border-line py-6">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p className="mb-3 inline-flex items-center gap-2 text-sm font-bold uppercase tracking-[0.16em] text-muted">
+              <LayoutDashboard size={16} className="text-pink" />
+              On-chain activity
+            </p>
+            <h2 className="font-display text-3xl font-bold text-text">Transaction history</h2>
+            <p className="mt-2 text-sm leading-6 text-muted">Escrow funding and payout records for your created and winning dares.</p>
+          </div>
+          <button
+            className="inline-flex h-10 items-center justify-center gap-2 border border-line px-4 text-sm font-bold text-text transition hover:border-pink hover:text-pink disabled:cursor-not-allowed disabled:text-muted"
+            type="button"
+            onClick={() => setTransactionRefresh((current) => current + 1)}
+            disabled={transactionsLoading || transactionHistory.length === 0}
+          >
+            <RefreshCw size={16} className={transactionsLoading ? "animate-spin" : ""} />
+            {transactionsLoading ? "Checking" : "Refresh"}
+          </button>
         </div>
-        <button
-          className="inline-flex h-11 items-center justify-center gap-2 bg-pink px-5 text-sm font-bold text-ink transition hover:bg-text disabled:cursor-not-allowed disabled:bg-raised disabled:text-muted"
-          type="button"
-          onClick={() => setWalletOpen(true)}
-          disabled={!connected}
-        >
-          <Wallet size={16} />
-          Wallet tools
-        </button>
+
+        {transactionHistory.length > 0 ? (
+          <div className="mt-6 border-t border-line">
+            {transactionHistory.map((entry) => {
+              const transaction = transactionStates[entry.hash];
+              const status = transaction?.status || (transactionsLoading ? "Checking" : "Pending");
+              const timestamp = transaction?.timestamp || (entry.timestamp ? new Date(entry.timestamp).getTime() : null);
+              const statusClass =
+                status === "Confirmed"
+                  ? "text-lime"
+                  : status === "Failed"
+                    ? "text-pink"
+                    : "text-muted";
+
+              return (
+                <div key={entry.id} className="grid gap-4 border-b border-line py-4 lg:grid-cols-[minmax(0,1fr)_auto_auto] lg:items-center">
+                  <div className="min-w-0">
+                    <p className={`text-xs font-bold uppercase tracking-[0.13em] ${statusClass}`}>{status}</p>
+                    <h3 className="mt-2 truncate font-display text-xl font-bold text-text">{entry.label}</h3>
+                    <p className="mt-1 truncate text-sm text-muted">{entry.title}</p>
+                    <p className="mt-3 break-all font-mono text-xs text-mutedFaint">{entry.hash}</p>
+                  </div>
+                  <div className="lg:text-right">
+                    <p className="font-mono text-xl font-bold text-gold">{formatReward(entry.reward)} ${entry.coin}</p>
+                    <p className="mt-2 font-mono text-xs text-muted">
+                      {timestamp ? new Date(timestamp).toLocaleString() : "Awaiting confirmation"}
+                      {transaction?.blockNumber ? ` - Block ${transaction.blockNumber}` : ""}
+                    </p>
+                  </div>
+                  <a
+                    className="inline-flex h-10 items-center justify-center gap-2 border border-line px-3 text-sm font-bold text-text transition hover:border-pink hover:text-pink"
+                    href={getTransactionExplorerUrl(entry.hash)}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Verify
+                    <ExternalLink size={15} />
+                  </a>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="mt-6 border-t border-line py-8 text-sm leading-6 text-muted">
+            Escrow and payout transactions will appear here after you create a funded dare or win one.
+          </div>
+        )}
       </section>
 
       {walletOpen ? (

@@ -13,6 +13,31 @@ export const DARE_ESCROW_ADDRESS = import.meta.env.VITE_DARE_ESCROW_ADDRESS || "
 export const CREATOR_FEE_BPS = 250;
 export const CREATOR_FEE_RATE = CREATOR_FEE_BPS / 10000;
 
+export function getTransactionExplorerUrl(transactionHash) {
+  return transactionHash ? `${ROBINHOOD_TESTNET.blockExplorerUrls[0]}/tx/${transactionHash}` : "";
+}
+
+export async function getTransactionStatus(transactionHash) {
+  if (!ethers.isHexString(transactionHash, 32)) {
+    return { status: "Unavailable", blockNumber: null, timestamp: null };
+  }
+
+  try {
+    const provider = new ethers.JsonRpcProvider(ROBINHOOD_TESTNET.rpcUrls[0], ROBINHOOD_TESTNET.chainId);
+    const receipt = await provider.getTransactionReceipt(transactionHash);
+    if (!receipt) return { status: "Pending", blockNumber: null, timestamp: null };
+
+    const block = await provider.getBlock(receipt.blockNumber);
+    return {
+      status: receipt.status === 1 ? "Confirmed" : "Failed",
+      blockNumber: receipt.blockNumber,
+      timestamp: block ? Number(block.timestamp) * 1000 : null,
+    };
+  } catch {
+    return { status: "Unavailable", blockNumber: null, timestamp: null };
+  }
+}
+
 const ERC20_ABI = [
   "function approve(address spender, uint256 amount) external returns (bool)",
   "function allowance(address owner, address spender) view returns (uint256)",

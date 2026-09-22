@@ -16,6 +16,15 @@ const dareEscrowAddress = Deno.env.get("DARE_ESCROW_ADDRESS") || Deno.env.get("V
 const escrowFinalizerPrivateKey =
   Deno.env.get("DARE_ESCROW_FINALIZER_PRIVATE_KEY") || Deno.env.get("ESCROW_FINALIZER_PRIVATE_KEY") || "";
 const communityFinalizerCronSecret = Deno.env.get("COMMUNITY_FINALIZER_CRON_SECRET") || "";
+const minimumDareRewards: Record<string, number> = {
+  USDG: 100,
+  PONS: 167,
+  CASHCAT: 619,
+  ARTIFICIAL_INU: 406,
+  MSFT: 0.2,
+  AAPL: 0.3,
+  NVDA: 0.45,
+};
 
 const escrowAbi = ["function finalize(bytes32 bountyId,address winner) external"];
 
@@ -181,7 +190,10 @@ async function createBounty(bounty: BountyInput) {
   const row = bountyToRow(bounty);
   if (!row.title) throw new Error("Title is required.");
   if (!row.poster) throw new Error("Wallet address is required.");
-  if (!row.reward || row.reward <= 0) throw new Error("Reward must be greater than 0.");
+  const minimumReward = minimumDareRewards[row.coin.toUpperCase()] || 1;
+  if (!Number.isFinite(row.reward) || row.reward < minimumReward) {
+    throw new Error(`Minimum bounty amount is ${minimumReward} ${row.coin}.`);
+  }
 
   const response = await supabaseFetch("/rest/v1/bounties", {
     method: "POST",
