@@ -72,6 +72,71 @@ label.inline-flex {
   border-radius: var(--radius-card);
 }
 
+.funding-option {
+  display: flex;
+  min-width: 0;
+  cursor: pointer;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1.5px solid #ece4ea;
+  border-radius: 20px;
+  background: #fff;
+  padding: 16px;
+  transition: border-color 150ms ease, background-color 150ms ease;
+}
+
+.funding-option:hover {
+  border-color: #e91e8c;
+}
+
+.funding-option.is-selected {
+  border-color: #e91e8c;
+  background: #fdeef6;
+}
+
+.funding-option-indicator {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 2px solid #d8d0d6;
+  border-radius: var(--radius-pill);
+  color: #fff;
+}
+
+.funding-option.is-selected .funding-option-indicator {
+  border-color: #e91e8c;
+  background: #e91e8c;
+}
+
+.winner-selector {
+  display: flex;
+  gap: 4px;
+  border-radius: 14px;
+  background: #f3eef2;
+  padding: 4px;
+}
+
+.winner-selector-option {
+  flex: 1;
+  cursor: pointer;
+  border-radius: 10px;
+  padding: 12px 10px;
+  text-align: center;
+  color: #8a8290;
+  font-size: 0.875rem;
+  font-weight: 700;
+  transition: background-color 150ms ease, box-shadow 150ms ease, color 150ms ease;
+}
+
+.winner-selector-option.is-selected {
+  background: #e91e8c;
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(233, 30, 140, 0.25);
+}
+
 @keyframes wallet-tab-in {
   from {
     opacity: 0;

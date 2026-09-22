@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
+  Check,
+  CircleAlert,
   ChevronRight,
   Clock3,
   Compass,
@@ -16,6 +18,7 @@ import {
   ThumbsDown,
   ThumbsUp,
   Trophy,
+  Upload,
   User,
   Wallet,
   X,
@@ -1084,9 +1087,20 @@ function App({ auth }) {
     }
   }
 
-  function handleBountyImage(event) {
-    const file = event.target.files?.[0];
+  function handleBountyImage(file) {
     if (!file) return;
+
+    const supportedTypes = ["image/png", "image/jpeg", "image/gif"];
+    if (!supportedTypes.includes(file.type)) {
+      setErrors((current) => ({ ...current, image: "Choose a PNG, JPEG, or GIF image." }));
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setErrors((current) => ({ ...current, image: "That file's a bit large - try something under 5MB." }));
+      return;
+    }
+
+    setErrors((current) => ({ ...current, image: "" }));
     setForm((current) => {
       if (current.image?.startsWith("blob:")) URL.revokeObjectURL(current.image);
       return {
@@ -1215,15 +1229,6 @@ function App({ auth }) {
     login();
   }
 
-  function handleHeaderAuthClick() {
-    if (!ready) return;
-    if (connected) {
-      setPage("Profile");
-      return;
-    }
-    login();
-  }
-
   function handleLogoutClick() {
     logout();
     setPage("Landing");
@@ -1252,7 +1257,7 @@ function App({ auth }) {
             <img className="h-10 w-auto" src="/favicon.svg" alt="" />
           </button>
 
-          <div className="flex items-center gap-2 sm:gap-3">
+          <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
             <div className="ui-card hidden max-w-full overflow-x-auto border border-line bg-surface p-1 lg:flex">
               {PAGES.map((navPage) => (
                 <button
@@ -1281,21 +1286,13 @@ function App({ auth }) {
             >
               {mobileNavOpen ? <X size={19} /> : <Menu size={19} />}
             </button>
-            <button
-              className="inline-flex h-10 items-center justify-center gap-2 border border-line bg-transparent px-3 text-sm font-medium text-text transition hover:border-pink hover:text-pink sm:px-4"
-              type="button"
-              onClick={handleHeaderAuthClick}
-            >
-              <User size={17} />
-              {connected ? truncateAddress(walletAddress) : "Login"}
-            </button>
           </div>
           {mobileNavOpen ? (
-            <div id="mobile-navigation" className="ui-card grid w-full border border-line bg-surface p-1 lg:hidden">
+            <div id="mobile-navigation" className="ui-card grid w-full grid-cols-1 gap-1 border border-line bg-surface p-1 lg:hidden">
               {PAGES.map((navPage) => (
                 <button
                   key={navPage}
-                  className={`flex h-11 items-center gap-3 px-3 text-left text-sm font-bold transition ${
+                  className={`flex h-11 w-full items-center justify-start gap-3 px-3 text-left text-sm font-bold transition ${
                     page === navPage ? "bg-pink text-ink" : "text-text hover:bg-raised"
                   }`}
                   type="button"
@@ -1320,6 +1317,7 @@ function App({ auth }) {
             bountiesLoading={bountiesLoading}
             stats={stats}
             onCreate={() => setPage("Create")}
+            onLogin={handleLoginClick}
             onExplore={() => setPage("Explore")}
           />
         )}
@@ -1439,7 +1437,7 @@ function App({ auth }) {
   );
 }
 
-function LandingPage({ bounties, bountiesLoading, stats, onCreate, onExplore }) {
+function LandingPage({ bounties, bountiesLoading, stats, onCreate, onExplore, onLogin }) {
   const featured = bounties.slice(0, 3);
   const steps = [
     {
@@ -1486,10 +1484,10 @@ function LandingPage({ bounties, bountiesLoading, stats, onCreate, onExplore }) 
             <button
               className="inline-flex h-12 items-center justify-center gap-2 border border-line bg-surface/80 px-6 text-sm font-bold text-text transition hover:border-pink hover:text-pink"
               type="button"
-              onClick={onCreate}
+              onClick={onLogin}
             >
-              <Plus size={18} />
-              Create dare
+              <User size={18} />
+              Login
             </button>
           </div>
         </div>
@@ -1815,6 +1813,7 @@ function CreatePage({ bountySyncStatus, errors, form, onChange, onImageChange, o
   const creatorFee = form.fundingType === "Self-Funded Dare" ? calculateCreatorFee(form.reward) : 0;
   const totalLaunchAmount = (Number(form.reward) || 0) + creatorFee;
   const minimumReward = getMinimumDareReward(form.coin);
+  const [imageDragging, setImageDragging] = useState(false);
 
   return (
     <section className="grid gap-8 lg:grid-cols-[0.85fr_1.15fr]">
@@ -1827,10 +1826,6 @@ function CreatePage({ bountySyncStatus, errors, form, onChange, onImageChange, o
         <p className="mt-5 max-w-xl text-base leading-7 text-muted">
           Post a clear task, set the reward, and choose how many hunters can join before the bounty fills.
         </p>
-        <div className="ui-card mt-8 grid grid-cols-1 overflow-hidden border border-line bg-surface min-[420px]:grid-cols-2">
-          <Stat label="Required fields" value={3} />
-          <Stat label="Default status" value="Open" />
-        </div>
       </div>
 
       <form className="space-y-5" onSubmit={onSubmit}>
@@ -1850,12 +1845,7 @@ function CreatePage({ bountySyncStatus, errors, form, onChange, onImageChange, o
           <p className="mb-3 text-xs font-bold uppercase tracking-[0.13em] text-muted">Funding type</p>
           <div className="grid gap-3 sm:grid-cols-2">
             {FUNDING_TYPES.map((type) => (
-              <label
-                key={type.value}
-                className={`cursor-pointer border p-4 transition ${
-                  form.fundingType === type.value ? "border-pink bg-pink/10" : "border-line hover:border-pink/70"
-                }`}
-              >
+              <label key={type.value} className={`funding-option ${form.fundingType === type.value ? "is-selected" : ""}`}>
                 <input
                   className="sr-only"
                   type="radio"
@@ -1864,8 +1854,13 @@ function CreatePage({ bountySyncStatus, errors, form, onChange, onImageChange, o
                   checked={form.fundingType === type.value}
                   onChange={(event) => onChange({ ...form, fundingType: event.target.value })}
                 />
-                <span className="block text-sm font-bold text-text">{type.value}</span>
-                <span className="mt-2 block text-sm leading-6 text-muted">{type.description}</span>
+                <span className="min-w-0">
+                  <span className="block text-sm font-bold text-text">{type.value}</span>
+                  <span className="mt-2 block text-sm leading-6 text-muted">{type.description}</span>
+                </span>
+                <span className="funding-option-indicator" aria-hidden="true">
+                  {form.fundingType === type.value ? <Check size={14} strokeWidth={3} /> : null}
+                </span>
               </label>
             ))}
           </div>
@@ -1873,14 +1868,9 @@ function CreatePage({ bountySyncStatus, errors, form, onChange, onImageChange, o
 
         <div className="border border-line bg-surface p-4">
           <p className="mb-3 text-xs font-bold uppercase tracking-[0.13em] text-muted">Winner selection</p>
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="winner-selector">
             {WINNER_SELECTION_OPTIONS.map((option) => (
-              <label
-                key={option}
-                className={`cursor-pointer border p-4 text-sm font-bold transition ${
-                  form.winnerSelection === option ? "border-pink bg-pink/10 text-text" : "border-line text-muted hover:border-pink/70"
-                }`}
-              >
+              <label key={option} className={`winner-selector-option ${form.winnerSelection === option ? "is-selected" : ""}`}>
                 <input
                   className="sr-only"
                   type="radio"
@@ -1911,21 +1901,59 @@ function CreatePage({ bountySyncStatus, errors, form, onChange, onImageChange, o
           />
         </Field>
 
-        <div className="border border-line bg-surface p-4">
+        <div>
           <p className="mb-3 text-xs font-bold uppercase tracking-[0.13em] text-muted">Bounty image</p>
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-            <div className="grid aspect-video w-full place-items-center overflow-hidden border border-line bg-ink sm:w-48">
-              {form.image ? (
-                <img className="h-full w-full object-cover" src={form.image} alt="" />
-              ) : (
-                <span className="text-sm text-mutedFaint">No image selected</span>
-              )}
-            </div>
-            <label className="inline-flex h-11 cursor-pointer items-center justify-center border border-line px-5 text-sm font-bold text-text transition hover:border-pink hover:text-pink">
-              Upload bounty image
-              <input className="sr-only" type="file" accept="image/*" onChange={onImageChange} />
-            </label>
+          <div
+            className={`ui-card relative grid min-h-52 overflow-hidden border-2 border-dashed transition ${
+              form.image || imageDragging
+                ? "border-[#E91E8C] bg-pink/10"
+                : "border-[#F4B6D7] bg-surface hover:border-[#E91E8C] hover:bg-pink/5"
+            }`}
+            onDragEnter={(event) => {
+              event.preventDefault();
+              setImageDragging(true);
+            }}
+            onDragOver={(event) => event.preventDefault()}
+            onDragLeave={(event) => {
+              if (event.currentTarget === event.target) setImageDragging(false);
+            }}
+            onDrop={(event) => {
+              event.preventDefault();
+              setImageDragging(false);
+              onImageChange(event.dataTransfer.files?.[0]);
+            }}
+          >
+            <input
+              className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
+              type="file"
+              accept="image/png,image/jpeg,image/gif"
+              aria-label="Upload bounty image"
+              onClick={(event) => {
+                event.currentTarget.value = "";
+              }}
+              onChange={(event) => onImageChange(event.target.files?.[0])}
+            />
+            {form.image ? (
+              <>
+                <img className="absolute inset-0 h-full w-full object-cover" src={form.image} alt="Selected bounty" />
+                <span className="pointer-events-none absolute bottom-3 left-3 z-20 max-w-[calc(100%-1.5rem)] truncate rounded-full bg-ink/85 px-3 py-1.5 font-mono text-xs font-bold text-text">
+                  {form.imageFile?.name || "Selected image"}
+                </span>
+              </>
+            ) : (
+              <div className="pointer-events-none z-0 grid place-items-center px-6 py-8 text-center">
+                <Upload size={28} className="mb-3 text-pink" />
+                <p className="text-sm font-bold text-text">Tap to upload your meme template</p>
+                <p className="mt-1 text-sm text-muted">or drag and drop</p>
+              </div>
+            )}
           </div>
+          {errors.image ? (
+            <p className="mt-2 inline-flex items-center gap-2 text-sm font-bold text-pink">
+              <CircleAlert size={16} />
+              {errors.image}
+            </p>
+          ) : null}
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
