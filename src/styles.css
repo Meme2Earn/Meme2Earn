@@ -72,6 +72,52 @@ label.inline-flex {
   border-radius: var(--radius-card);
 }
 
+@keyframes wallet-tab-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.wallet-tab-panel {
+  animation: wallet-tab-in 180ms ease-out;
+}
+
+.profile-stats > * {
+  border-bottom-width: 1px;
+  border-right-width: 1px;
+}
+
+.profile-stats > :nth-child(even) {
+  border-right-width: 0;
+}
+
+.profile-stats > :nth-child(n + 3) {
+  border-bottom-width: 0;
+}
+
+@media (min-width: 560px) {
+  .profile-stats > * {
+    border-bottom-width: 0;
+    border-right-width: 1px;
+  }
+
+  .profile-stats > :last-child {
+    border-right-width: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wallet-tab-panel {
+    animation: none;
+  }
+}
+
 button:focus-visible,
 input:focus-visible,
 textarea:focus-visible,

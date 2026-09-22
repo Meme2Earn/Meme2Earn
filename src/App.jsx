@@ -1661,10 +1661,6 @@ function ExplorePage({
     <>
       <section className="grid gap-10 border-b border-line pb-10 lg:grid-cols-[1.15fr_0.85fr] lg:items-end">
         <div>
-          <p className="mb-4 inline-flex items-center gap-2 text-sm font-bold uppercase tracking-[0.16em] text-muted">
-            <Sparkles size={16} className="text-pink" />
-            Meme bounties funded onchain
-          </p>
           <h1 className="max-w-4xl font-display text-5xl font-bold leading-[0.95] tracking-normal text-text sm:text-7xl lg:text-8xl">
             Turn dank into bank.
           </h1>
@@ -2418,7 +2414,7 @@ function ProfilePage({
         </p>
       </div>
 
-      <div className="ui-card grid overflow-hidden border border-line bg-surface min-[420px]:grid-cols-2 sm:grid-cols-4">
+      <div className="profile-stats ui-card grid grid-cols-2 overflow-hidden border border-line bg-surface min-[560px]:grid-cols-4">
         <Stat label="Joined" value={joinedBounties.length} />
         <Stat label="Posted" value={postedBounties.length} />
         <Stat label="Open dares" value={stats.open} />
@@ -2614,8 +2610,9 @@ function ProfilePage({
               </button>
             </div>
 
+            <div className="h-[230px] overflow-y-auto">
             {walletToolTab === "receive" ? (
-              <div id="wallet-tools-receive-panel" className="space-y-4 border border-line bg-surface p-4" role="tabpanel" aria-labelledby="wallet-tools-receive-tab">
+              <div id="wallet-tools-receive-panel" className="wallet-tab-panel space-y-4 border border-line bg-surface p-4" role="tabpanel" aria-labelledby="wallet-tools-receive-tab">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-[0.13em] text-mutedFaint">Receive</p>
                   <p className="mt-2 text-sm leading-6 text-muted">Use this address to receive supported tokens.</p>
@@ -2635,7 +2632,7 @@ function ProfilePage({
               </div>
             ) : (
 
-              <form id="wallet-tools-send-panel" className="space-y-4 border border-line bg-surface p-4" role="tabpanel" aria-labelledby="wallet-tools-send-tab" onSubmit={handleSendToken}>
+              <form id="wallet-tools-send-panel" className="wallet-tab-panel space-y-4 border border-line bg-surface p-4" role="tabpanel" aria-labelledby="wallet-tools-send-tab" onSubmit={handleSendToken}>
                 <div>
                   <p className="text-xs font-bold uppercase tracking-[0.13em] text-mutedFaint">Send</p>
                   <p className="mt-2 text-sm leading-6 text-muted">Enter a recipient address and token amount.</p>
@@ -2712,6 +2709,7 @@ function ProfilePage({
                 </button>
               </form>
             )}
+            </div>
           </div>
         </div>
       ) : null}
@@ -2961,7 +2959,7 @@ function CreatorSubmissionRow({ bounty, creatorDecides, onSelectWinner, selected
 
 function Stat({ label, loading = false, value }) {
   return (
-    <div className="min-w-0 border-b border-line px-4 py-4 last:border-b-0 min-[420px]:border-b-0 min-[420px]:border-r min-[420px]:py-1 min-[420px]:last:border-r-0 sm:px-6">
+    <div className="min-w-0 border-b border-line px-4 py-4 text-center last:border-b-0 min-[420px]:border-b-0 min-[420px]:border-r min-[420px]:py-1 min-[420px]:last:border-r-0 sm:px-6">
       <p className="break-words font-mono text-3xl font-bold text-pink sm:text-4xl" aria-busy={loading}>
         <AnimatedNumber value={loading ? 0 : value} />
       </p>
