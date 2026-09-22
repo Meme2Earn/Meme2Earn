@@ -2,6 +2,7 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const profileFunctionUrl = import.meta.env.VITE_SUPABASE_PROFILE_FUNCTION_URL;
 const marketplaceFunctionUrl = import.meta.env.VITE_SUPABASE_MARKETPLACE_FUNCTION_URL;
+const bountyImageBucket = "bounty-images";
 const submissionVideoBucket = "submission-videos";
 
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
@@ -9,7 +10,54 @@ export const isSecureProfileStorageConfigured = Boolean(profileFunctionUrl);
 export const isSecureMarketplaceConfigured = Boolean(marketplaceFunctionUrl);
 
 function cleanBaseUrl(url) {
-  return url.replace(/\/$/, "");
+  try {
+    const parsed = new URL(url);
+    if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("Invalid protocol.");
+    return parsed.origin;
+  } catch {
+    throw new Error("Supabase URL is invalid. Check VITE_SUPABASE_URL in .env.");
+  }
+}
+
+async function parseJsonResponse(response, fallbackMessage) {
+  const contentType = response.headers.get("content-type") || "";
+  const body = await response.text();
+
+  if (!contentType.includes("application/json")) {
+    const preview = body.trim().slice(0, 80);
+    throw new Error(preview.startsWith("<!doctype") || preview.startsWith("<html")
+      ? `${fallbackMessage} The server returned HTML instead of JSON. Check the configured URL.`
+      : body || fallbackMessage);
+  }
+
+  try {
+    return body ? JSON.parse(body) : null;
+  } catch {
+    throw new Error(`${fallbackMessage} The server returned invalid JSON.`);
+  }
+}
+
+async function getResponseError(response, fallbackMessage) {
+  const body = await response.text();
+  if (!body) return fallbackMessage;
+
+  try {
+    const parsed = JSON.parse(body);
+    return parsed.message || parsed.error || fallbackMessage;
+  } catch {
+    return body;
+  }
+}
+
+function normalizeErrorMessage(message, fallbackMessage) {
+  if (!message) return fallbackMessage;
+
+  try {
+    const parsed = JSON.parse(message);
+    return parsed.message || parsed.error || fallbackMessage;
+  } catch {
+    return message;
+  }
 }
 
 function bountyFromRow(row) {
@@ -133,9 +181,9 @@ async function callMarketplaceFunction({ action, getAccessToken, payload }) {
     body: JSON.stringify({ action, ...payload }),
   });
 
-  const result = await response.json().catch(() => ({}));
+  const result = await parseJsonResponse(response, "Marketplace request failed.").catch(() => ({}));
   if (!response.ok) {
-    throw new Error(result.error || "Marketplace request failed.");
+    throw new Error(normalizeErrorMessage(result.error, "Marketplace request failed."));
   }
 
   return result;
@@ -157,8 +205,43 @@ export async function fetchBounties() {
     throw new Error(message || "Could not load bounties.");
   }
 
-  const rows = await response.json();
+  const rows = await parseJsonResponse(response, "Could not load bounties.");
   return { stored: true, bounties: rows.map(bountyFromRow) };
+}
+
+export async function uploadBountyImage({ bountyId, file, walletAddress }) {
+  if (!isSupabaseConfigured || !file) return { stored: false, imageUrl: "" };
+  if (!file.type?.startsWith("image/")) throw new Error("Bounty image must be an image file.");
+  if (file.size > 10 * 1024 * 1024) throw new Error("Bounty image must be 10 MB or smaller.");
+
+  const baseUrl = cleanBaseUrl(supabaseUrl);
+  const extension = file.name.includes(".") ? file.name.split(".").pop() : "jpg";
+  const path = [
+    safeStorageSegment(walletAddress),
+    safeStorageSegment(bountyId),
+    `${Date.now()}-${safeStorageSegment(file.name || `bounty.${extension}`)}`,
+  ].join("/");
+
+  const response = await fetch(`${baseUrl}/storage/v1/object/${bountyImageBucket}/${path}`, {
+    method: "POST",
+    headers: {
+      apikey: supabaseAnonKey,
+      Authorization: `Bearer ${supabaseAnonKey}`,
+      "Content-Type": file.type || "image/jpeg",
+      "x-upsert": "false",
+    },
+    body: file,
+  });
+
+  if (!response.ok) {
+    throw new Error(await getResponseError(response, "Could not upload bounty image."));
+  }
+
+  return {
+    stored: true,
+    imagePath: path,
+    imageUrl: `${baseUrl}/storage/v1/object/public/${bountyImageBucket}/${path}`,
+  };
 }
 
 export async function createBountyRecord({ bounty, getAccessToken }) {
@@ -188,7 +271,7 @@ export async function createBountyRecord({ bounty, getAccessToken }) {
     throw new Error(message || "Could not create bounty.");
   }
 
-  const [row] = await response.json();
+  const [row] = await parseJsonResponse(response, "Could not create bounty.");
   return { stored: true, bounty: bountyFromRow(row) };
 }
 
@@ -209,7 +292,7 @@ export async function fetchBountyJoins(walletAddress) {
     throw new Error(message || "Could not load joined bounties.");
   }
 
-  const rows = await response.json();
+  const rows = await parseJsonResponse(response, "Could not load joined bounties.");
   return { stored: true, joins: rows.map(joinFromRow) };
 }
 
@@ -240,11 +323,11 @@ export async function joinBountyRecord({ bountyId, getAccessToken, walletAddress
   });
 
   if (!response.ok) {
-    const message = await response.text();
+    const message = await getResponseError(response, "Could not join bounty.");
     throw new Error(message || "Could not join bounty.");
   }
 
-  const rows = await response.json();
+  const rows = await parseJsonResponse(response, "Could not join bounty.");
   return { stored: true, bounty: rows[0] ? bountyFromRow(rows[0]) : null };
 }
 
@@ -264,7 +347,7 @@ export async function fetchSubmissions() {
     throw new Error(message || "Could not load submissions.");
   }
 
-  const rows = await response.json();
+  const rows = await parseJsonResponse(response, "Could not load submissions.");
   const submissions = rows.map(submissionFromRow).reduce((grouped, submission) => {
     grouped[submission.bountyId] = [...(grouped[submission.bountyId] || []), submission];
     return grouped;
@@ -290,7 +373,7 @@ export async function fetchSubmissionVotes(walletAddress) {
     throw new Error(message || "Could not load submission votes.");
   }
 
-  const rows = await response.json();
+  const rows = await parseJsonResponse(response, "Could not load submission votes.");
   const votes = rows.map(voteFromRow).reduce((grouped, vote) => {
     grouped[vote.submissionId] = vote.vote;
     return grouped;
@@ -339,7 +422,7 @@ export async function createSubmissionRecord({ bountyId, getAccessToken, submiss
     throw new Error(message || "Could not save submission.");
   }
 
-  const [row] = await response.json();
+  const [row] = await parseJsonResponse(response, "Could not save submission.");
   return { stored: true, submission: submissionFromRow(row) };
 }
 
@@ -439,7 +522,7 @@ export async function saveProfileWithPrivy({ getAccessToken, profile, walletAddr
     body: formData,
   });
 
-  const result = await response.json().catch(() => ({}));
+  const result = await parseJsonResponse(response, "Could not save profile.").catch(() => ({}));
   if (!response.ok) {
     throw new Error(result.error || "Could not save profile.");
   }
@@ -448,6 +531,37 @@ export async function saveProfileWithPrivy({ getAccessToken, profile, walletAddr
     avatarUrl: result.avatarUrl || profile.avatar,
     stored: true,
   };
+}
+
+export async function fetchProfileWithPrivy({ getAccessToken }) {
+  if (!isSecureProfileStorageConfigured) return { stored: false };
+  const accessToken = await getAccessToken?.();
+  if (!accessToken) throw new Error("Login session expired. Please login again.");
+
+  const response = await fetch(profileFunctionUrl, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const result = await parseJsonResponse(response, "Could not load profile.").catch(() => ({}));
+  if (!response.ok) throw new Error(result.error || "Could not load profile.");
+  return { ...result, stored: true };
+}
+
+export async function acceptTermsWithPrivy({ getAccessToken, walletAddress }) {
+  if (!isSecureProfileStorageConfigured) return { stored: false };
+  const accessToken = await getAccessToken?.();
+  if (!accessToken) throw new Error("Login session expired. Please login again.");
+
+  const formData = new FormData();
+  formData.append("action", "accept_terms");
+  formData.append("walletAddress", walletAddress || "");
+  const response = await fetch(profileFunctionUrl, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body: formData,
+  });
+  const result = await parseJsonResponse(response, "Could not save terms acceptance.").catch(() => ({}));
+  if (!response.ok) throw new Error(result.error || "Could not save terms acceptance.");
+  return { ...result, stored: true };
 }
 
 export async function saveProfileRecord({ walletAddress, profile }) {

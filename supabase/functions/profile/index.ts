@@ -2,7 +2,7 @@ import { importSPKI, jwtVerify } from "npm:jose@5.9.6";
 
 const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Origin": "*",
 };
 
@@ -15,6 +15,40 @@ const profileBucket = Deno.env.get("PROFILE_BUCKET") || "profiles";
 function toPemPublicKey(value: string) {
   if (value.includes("BEGIN PUBLIC KEY")) return value.replace(/\\n/g, "\n");
   return `-----BEGIN PUBLIC KEY-----\n${value}\n-----END PUBLIC KEY-----`;
+}
+
+async function getProfile(id: string) {
+  const response = await fetch(
+    `${supabaseUrl}/rest/v1/profiles?id=eq.${encodeURIComponent(id)}&select=id,username,avatar_url,wallet_address,terms_accepted_at&limit=1`,
+    {
+      headers: {
+        apikey: serviceRoleKey,
+        Authorization: `Bearer ${serviceRoleKey}`,
+      },
+    },
+  );
+  if (!response.ok) throw new Error((await response.text()) || "Could not load profile.");
+  const rows = await response.json();
+  return rows[0] || null;
+}
+
+async function acceptTerms(id: string, walletAddress: string) {
+  const response = await fetch(`${supabaseUrl}/rest/v1/profiles?on_conflict=id`, {
+    method: "POST",
+    headers: {
+      apikey: serviceRoleKey,
+      Authorization: `Bearer ${serviceRoleKey}`,
+      "Content-Type": "application/json",
+      Prefer: "resolution=merge-duplicates,return=minimal",
+    },
+    body: JSON.stringify([{
+      id,
+      wallet_address: walletAddress || null,
+      terms_accepted_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }]),
+  });
+  if (!response.ok) throw new Error((await response.text()) || "Could not save terms acceptance.");
 }
 
 function jsonResponse(body: Record<string, unknown>, status = 200) {
@@ -88,6 +122,7 @@ async function upsertProfile(profile: {
         username: profile.username,
         avatar_url: profile.avatarUrl,
         wallet_address: profile.walletAddress,
+        terms_accepted_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       },
     ]),
@@ -100,13 +135,33 @@ async function upsertProfile(profile: {
 
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
-  if (request.method !== "POST") return jsonResponse({ error: "Method not allowed." }, 405);
+  if (!["GET", "POST"].includes(request.method)) return jsonResponse({ error: "Method not allowed." }, 405);
 
   try {
     if (!supabaseUrl || !serviceRoleKey) throw new Error("Supabase service credentials are not configured.");
 
     const privyUserId = await verifyPrivyToken(request);
+    if (request.method === "GET") {
+      const profile = await getProfile(privyUserId);
+      return jsonResponse({
+        exists: Boolean(profile),
+        profile: profile ? {
+          avatar: profile.avatar_url || "",
+          username: profile.username || "",
+        } : null,
+        profileComplete: Boolean(profile?.username || profile?.avatar_url),
+        termsAccepted: Boolean(profile?.terms_accepted_at),
+      });
+    }
+
     const formData = await request.formData();
+    const action = String(formData.get("action") || "save_profile");
+    if (action === "accept_terms") {
+      const walletAddress = String(formData.get("walletAddress") || "").trim();
+      await acceptTerms(privyUserId, walletAddress);
+      return jsonResponse({ id: privyUserId, termsAccepted: true });
+    }
+
     const username = String(formData.get("username") || "").trim();
     const walletAddress = String(formData.get("walletAddress") || "").trim();
     const currentAvatarUrl = String(formData.get("currentAvatarUrl") || "").trim();

@@ -10,18 +10,25 @@ const SUPPORTED_TOKENS = [
   ["MSFT", "0xe93237C50D904957Cf27E7B1133b510C669c2e74"],
 ];
 
+const testTokenAddress = process.env.TEST_TOKEN_ADDRESS || process.env.VITE_TEST_TOKEN_ADDRESS || "";
+if (testTokenAddress) {
+  SUPPORTED_TOKENS.push(["M2ET", testTokenAddress]);
+}
+
 async function main() {
   const { ethers } = hre;
   const [deployer] = await ethers.getSigners();
   const admin = process.env.ESCROW_ADMIN || deployer.address;
+  const feeRecipient = process.env.CREATOR_FEE_RECIPIENT || admin;
   const finalizer = process.env.ESCROW_FINALIZER || "";
 
   console.log("Network:", hre.network.name);
   console.log("Deployer:", deployer.address);
   console.log("Admin:", admin);
+  console.log("Fee recipient:", feeRecipient);
 
   const DareEscrow = await ethers.getContractFactory("DareEscrow");
-  const escrow = await DareEscrow.deploy(admin);
+  const escrow = await DareEscrow.deploy(admin, feeRecipient);
   await escrow.waitForDeployment();
 
   const escrowAddress = await escrow.getAddress();

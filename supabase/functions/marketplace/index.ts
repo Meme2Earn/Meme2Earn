@@ -15,6 +15,7 @@ const robinhoodRpcUrl = Deno.env.get("RH_RPC_URL") || "https://rpc.testnet.chain
 const dareEscrowAddress = Deno.env.get("DARE_ESCROW_ADDRESS") || Deno.env.get("VITE_DARE_ESCROW_ADDRESS") || "";
 const escrowFinalizerPrivateKey =
   Deno.env.get("DARE_ESCROW_FINALIZER_PRIVATE_KEY") || Deno.env.get("ESCROW_FINALIZER_PRIVATE_KEY") || "";
+const communityFinalizerCronSecret = Deno.env.get("COMMUNITY_FINALIZER_CRON_SECRET") || "";
 
 const escrowAbi = ["function finalize(bytes32 bountyId,address winner) external"];
 
@@ -53,6 +54,13 @@ function jsonResponse(body: Record<string, unknown>, status = 200) {
       "Content-Type": "application/json",
     },
   });
+}
+
+function verifyCommunityFinalizerCron(request: Request) {
+  const providedSecret = request.headers.get("x-community-finalizer-cron-secret") || "";
+  if (!communityFinalizerCronSecret || providedSecret !== communityFinalizerCronSecret) {
+    throw new Error("Unauthorized automated finalization request.");
+  }
 }
 
 async function verifyPrivyToken(request: Request) {
@@ -215,6 +223,12 @@ async function createSubmission(body: Record<string, unknown>) {
   );
   const joinedRows = await joinedResponse.json();
   if (!joinedRows.length) throw new Error("Join bounty before submitting.");
+
+  const existingResponse = await supabaseFetch(
+    `/rest/v1/bounty_submissions?select=id&bounty_id=eq.${encodeFilter(bountyId)}&wallet_address=eq.${encodeFilter(walletAddress)}&limit=1`
+  );
+  const existingRows = await existingResponse.json();
+  if (existingRows.length) throw new Error("You already submitted a video for this campaign.");
 
   const response = await supabaseFetch("/rest/v1/bounty_submissions", {
     method: "POST",
@@ -379,6 +393,30 @@ async function finalizeCommunityWinner(body: Record<string, unknown>) {
   return updated ? normalizeBounty(updated) : null;
 }
 
+async function finalizeExpiredCommunityWinners() {
+  const today = new Date().toISOString().slice(0, 10);
+  const response = await supabaseFetch(
+    `/rest/v1/bounties?select=*&winner_selection=eq.${encodeFilter("Community decides")}&winner_submission_id=is.null&deadline=not.is.null&deadline=lte.${encodeFilter(today)}&status=neq.Completed&order=deadline.asc&limit=25`,
+  );
+  const candidates = await response.json();
+  const finalized: string[] = [];
+  const skipped: Array<{ id: string; reason: string }> = [];
+
+  for (const bounty of candidates) {
+    try {
+      const finalizedBounty = await finalizeCommunityWinner({ bountyId: bounty.id });
+      if (finalizedBounty) finalized.push(String(bounty.id));
+    } catch (error) {
+      skipped.push({
+        id: String(bounty.id),
+        reason: error instanceof Error ? error.message : "Could not finalize bounty.",
+      });
+    }
+  }
+
+  return { checked: candidates.length, finalized, skipped };
+}
+
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   if (request.method !== "POST") return jsonResponse({ error: "Method not allowed." }, 405);
@@ -386,9 +424,16 @@ Deno.serve(async (request) => {
   try {
     if (!supabaseUrl || !serviceRoleKey) throw new Error("Supabase service credentials are not configured.");
 
-    const privyUserId = await verifyPrivyToken(request);
     const body = await request.json();
     const action = String(body.action || "");
+
+    if (action === "finalize_expired_community_winners") {
+      verifyCommunityFinalizerCron(request);
+      const result = await finalizeExpiredCommunityWinners();
+      return jsonResponse(result);
+    }
+
+    const privyUserId = await verifyPrivyToken(request);
 
     if (action === "create_bounty") {
       const bounty = await createBounty(body.bounty);

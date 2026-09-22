@@ -5,7 +5,8 @@
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
     "contracts:compile": "hardhat compile",
-    "deploy:robinhood-testnet": "hardhat run scripts/deploy-dare-escrow.js --network robinhoodTestnet"
+    "deploy:robinhood-testnet": "hardhat run scripts/deploy-dare-escrow.js --network robinhoodTestnet",
+    "deploy:test-token": "hardhat run scripts/deploy-test-token.js --network robinhoodTestnet"
   },
   "dependencies": {
     "@openzeppelin/contracts": "^5.6.1",
@@ -25,7 +26,9 @@
     ]
   },
   "devDependencies": {
+    "@nomicfoundation/hardhat-network-helpers": "^1.1.0",
     "@nomicfoundation/hardhat-toolbox": "^6.1.2",
+    "chai": "^4.5.0",
     "dotenv": "^17.4.2",
     "hardhat": "^2.28.0"
   }

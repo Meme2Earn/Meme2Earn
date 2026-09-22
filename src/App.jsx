@@ -5,6 +5,7 @@ import {
   Compass,
   Copy,
   LayoutDashboard,
+  LoaderCircle,
   Plus,
   Search,
   Send,
@@ -17,10 +18,12 @@ import {
   X,
 } from "lucide-react";
 import {
+  acceptTermsWithPrivy,
   createBountyRecord,
   createSubmissionRecord,
   fetchBounties,
   fetchBountyJoins,
+  fetchProfileWithPrivy,
   finalizeCommunityWinnerRecord,
   fetchSubmissionVotes,
   fetchSubmissions,
@@ -30,14 +33,18 @@ import {
   saveProfileRecord,
   saveProfileWithPrivy,
   selectCreatorWinnerRecord,
+  uploadBountyImage,
   uploadSubmissionVideo,
   voteSubmissionRecord,
 } from "./supabaseStorage.js";
 import {
+  calculateCreatorFee,
   createBountyEscrow,
   DARE_ESCROW_ADDRESS,
   finalizeBountyEscrow,
   fundBountyEscrow,
+  getTokenBalance,
+  transferToken,
 } from "./escrowClient.js";
 
 const CATEGORY_COLORS = {
@@ -51,6 +58,7 @@ const CATEGORY_COLORS = {
 const TABS = ["Open", "In Progress", "Completed", "All"];
 const PAGES = ["Explore", "M2E TV", "Create", "Profile"];
 const AUTH_ONLY_PAGES = ["Terms", "SetupProfile", "Profile"];
+const TEST_TOKEN_ADDRESS = import.meta.env.VITE_TEST_TOKEN_ADDRESS || "";
 const TOKEN_METADATA = {
   USDG: {
     contract: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
@@ -80,6 +88,14 @@ const TOKEN_METADATA = {
     contract: "0xe93237C50D904957Cf27E7B1133b510C669c2e74",
     logo: "/tokens/msft.ico",
   },
+  ...(TEST_TOKEN_ADDRESS
+    ? {
+        M2ET: {
+          contract: TEST_TOKEN_ADDRESS,
+          logo: "",
+        },
+      }
+    : {}),
 };
 const TOKEN_CONTRACTS = Object.fromEntries(
   Object.entries(TOKEN_METADATA).map(([token, metadata]) => [token, metadata.contract]),
@@ -96,7 +112,7 @@ const FUNDING_TYPES = [
     description: "The community funds it.",
   },
 ];
-const WINNER_SELECTION_OPTIONS = ["Community decides", "Creator decides"];
+const WINNER_SELECTION_OPTIONS = ["Creator decides", "Community decides"];
 
 const seedBounties = [
   {
@@ -195,6 +211,7 @@ const blankForm = {
   title: "",
   description: "",
   image: "",
+  imageFile: null,
   fundingType: "Self-Funded Dare",
   winnerSelection: "Community decides",
   category: "Meme Template",
@@ -230,6 +247,15 @@ function formatReward(value) {
   return new Intl.NumberFormat("en-US").format(value);
 }
 
+function formatTokenBalance(value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return "0.00";
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: numericValue >= 1 ? 4 : 8,
+    minimumFractionDigits: 2,
+  }).format(numericValue);
+}
+
 function truncateAddress(address) {
   if (!address) return "Wallet pending";
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
@@ -245,10 +271,17 @@ function getTokenLogoUrl(token) {
 
 function getDaysLeft(dateValue) {
   if (!dateValue) return 7;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const deadline = new Date(`${dateValue}T00:00:00`);
-  return Math.max(0, Math.ceil((deadline - today) / 86400000));
+  const value = String(dateValue);
+  const deadline = new Date(value.includes("T") ? value : `${value}T23:59:59.999`);
+  if (Number.isNaN(deadline.getTime())) return 0;
+  return Math.max(0, Math.ceil((deadline.getTime() - Date.now()) / 86400000));
+}
+
+function hasDeadlinePassed(dateValue) {
+  if (!dateValue) return false;
+  const value = String(dateValue);
+  const deadline = new Date(value.includes("T") ? value : `${value}T23:59:59.999`);
+  return !Number.isNaN(deadline.getTime()) && Date.now() >= deadline.getTime();
 }
 
 function firstValue(...values) {
@@ -316,10 +349,12 @@ function App({ auth }) {
   const connected = ready && authenticated;
   const [activeTab, setActiveTab] = useState("Open");
   const [query, setQuery] = useState("");
-  const [bounties, setBounties] = useState(seedBounties);
+  const [bounties, setBounties] = useState([]);
+  const [bountiesLoading, setBountiesLoading] = useState(true);
   const [selectedBountyId, setSelectedBountyId] = useState(null);
   const [joinedIds, setJoinedIds] = useState([]);
   const [joiningBountyIds, setJoiningBountyIds] = useState([]);
+  const [joinErrors, setJoinErrors] = useState({});
   const [submissions, setSubmissions] = useState({});
   const [submissionVotes, setSubmissionVotes] = useState({});
   const [form, setForm] = useState(blankForm);
@@ -343,7 +378,8 @@ function App({ auth }) {
 
     async function loadBounties() {
       if (!isSupabaseConfigured) {
-        setBountySyncStatus("Demo campaigns are loaded locally until Supabase is configured.");
+        setBountySyncStatus("Campaign data is unavailable because Supabase is not configured.");
+        setBountiesLoading(false);
         return;
       }
 
@@ -351,13 +387,14 @@ function App({ auth }) {
       try {
         const result = await fetchBounties();
         if (cancelled) return;
-        if (result.bounties.length > 0) {
-          setBounties(result.bounties);
-        }
-        setBountySyncStatus(result.bounties.length > 0 ? "" : "No saved campaigns yet. Showing demo campaigns.");
+        setBounties(result.bounties);
+        setBountySyncStatus("");
       } catch (error) {
         if (cancelled) return;
-        setBountySyncStatus(error.message || "Could not load saved campaigns. Showing demo campaigns.");
+        setBounties([]);
+        setBountySyncStatus(error.message || "Could not load dare campaigns.");
+      } finally {
+        if (!cancelled) setBountiesLoading(false);
       }
     }
 
@@ -444,29 +481,53 @@ function App({ auth }) {
   }, [walletAddress]);
 
   useEffect(() => {
-    if (!ready) return;
+    let cancelled = false;
 
-    if (!authenticated) {
-      setAccountLoaded(true);
-      setTermsAccepted(false);
-      setProfileComplete(false);
-      setXProfilePrefilled(false);
-      if (AUTH_ONLY_PAGES.includes(page)) setPage("Landing");
-      return;
-    }
+    async function loadAccount() {
+      if (!ready) return;
+      if (!authenticated) {
+        setAccountLoaded(true);
+        setTermsAccepted(false);
+        setProfileComplete(false);
+        setXProfilePrefilled(false);
+        if (AUTH_ONLY_PAGES.includes(page)) setPage("Landing");
+        return;
+      }
+      if (!userStorageKey) {
+        setAccountLoaded(false);
+        return;
+      }
 
-    if (!userStorageKey) {
       setAccountLoaded(false);
-      return;
+      const stored = readStoredAccount(userStorageKey);
+      let accepted = Boolean(stored.termsAccepted);
+      let complete = Boolean(stored.profileComplete);
+      let savedProfile = stored.profile || null;
+
+      if (isSecureProfileStorageConfigured) {
+        try {
+          const result = await fetchProfileWithPrivy({ getAccessToken });
+          if (result.stored && result.exists) {
+            accepted = Boolean(result.termsAccepted);
+            complete = Boolean(result.profileComplete);
+            savedProfile = result.profile || savedProfile;
+          }
+        } catch (error) {
+          setProfileStatus(error.message || "Could not check account setup.");
+        }
+      }
+
+      if (cancelled) return;
+      setTermsAccepted(accepted);
+      setProfileComplete(complete);
+      if (savedProfile) setProfile((current) => ({ ...current, ...savedProfile }));
+      setAccountLoaded(true);
     }
 
-    const stored = readStoredAccount(userStorageKey);
-    setTermsAccepted(Boolean(stored.termsAccepted));
-    setProfileComplete(Boolean(stored.profileComplete));
-    if (stored.profile) {
-      setProfile((current) => ({ ...current, ...stored.profile }));
-    }
-    setAccountLoaded(true);
+    loadAccount();
+    return () => {
+      cancelled = true;
+    };
   }, [authenticated, ready, userStorageKey]);
 
   useEffect(() => {
@@ -548,6 +609,14 @@ function App({ auth }) {
     [bounties, joinedIds],
   );
 
+  const wonBounties = useMemo(
+    () =>
+      walletAddress
+        ? bounties.filter((bounty) => bounty.winnerWalletAddress?.toLowerCase() === walletAddress.toLowerCase())
+        : [],
+    [bounties, walletAddress],
+  );
+
   const selectedBounty = useMemo(
     () => bounties.find((bounty) => bounty.id === selectedBountyId),
     [bounties, selectedBountyId],
@@ -576,7 +645,7 @@ function App({ auth }) {
     }
 
     if (!walletAddress) {
-      setMarketStatus("Your wallet is still being created. Try again in a moment.");
+      setJoinErrors((current) => ({ ...current, [id]: "Your wallet is still being created. Try again in a moment." }));
       return;
     }
 
@@ -584,9 +653,14 @@ function App({ auth }) {
     if (joiningBountyIds.includes(id)) return;
 
     const targetBounty = bounties.find((bounty) => bounty.id === id);
-    if (!targetBounty || targetBounty.applicants >= targetBounty.maxApplicants) return;
+    if (!targetBounty) return;
 
     setJoiningBountyIds((current) => (current.includes(id) ? current : [...current, id]));
+    setJoinErrors((current) => {
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
 
     if (isSupabaseConfigured) {
       try {
@@ -603,10 +677,16 @@ function App({ auth }) {
         }
         setJoinedIds((current) => (current.includes(id) ? current : [...current, id]));
         setMarketStatus("");
+        setJoinErrors((current) => {
+          const next = { ...current };
+          delete next[id];
+          return next;
+        });
         setJoiningBountyIds((current) => current.filter((bountyId) => bountyId !== id));
         return;
       } catch (error) {
-        setMarketStatus(error.message || "Could not join bounty.");
+        setMarketStatus("");
+        setJoinErrors((current) => ({ ...current, [id]: error.message || "Could not join bounty." }));
         setJoiningBountyIds((current) => current.filter((bountyId) => bountyId !== id));
         return;
       }
@@ -614,7 +694,7 @@ function App({ auth }) {
 
     setBounties((current) =>
       current.map((bounty) => {
-        if (bounty.id !== id || bounty.applicants >= bounty.maxApplicants || joinedIds.includes(id)) {
+        if (bounty.id !== id || joinedIds.includes(id)) {
           return bounty;
         }
 
@@ -626,18 +706,31 @@ function App({ auth }) {
     );
     setJoinedIds((current) => (current.includes(id) ? current : [...current, id]));
     setMarketStatus("");
+    setJoinErrors((current) => {
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
     setJoiningBountyIds((current) => current.filter((bountyId) => bountyId !== id));
   }
 
   async function handleDareSubmission(bountyId, submission) {
+    const alreadySubmitted = (submissions[bountyId] || []).some(
+      (item) => item.walletAddress?.toLowerCase() === walletAddress?.toLowerCase(),
+    );
+    if (alreadySubmitted) {
+      setMarketStatus("You already submitted a video for this campaign.");
+      return false;
+    }
+
     if (!submission.videoFile) {
       setMarketStatus("Upload a video before submitting.");
-      return;
+      return false;
     }
 
     if (!submission.videoFile.type.startsWith("video/")) {
       setMarketStatus("Upload a valid video file.");
-      return;
+      return false;
     }
 
     const localVideoUrl = URL.createObjectURL(submission.videoFile);
@@ -683,11 +776,11 @@ function App({ auth }) {
           [bountyId]: [result.submission, ...(current[bountyId] || [])],
         }));
         setMarketStatus("");
-        return;
+        return true;
       } catch (error) {
         URL.revokeObjectURL(localVideoUrl);
         setMarketStatus(error.message || "Could not save submission.");
-        return;
+        return false;
       }
     }
 
@@ -696,6 +789,7 @@ function App({ auth }) {
       [bountyId]: [nextSubmission, ...(current[bountyId] || [])],
     }));
     setMarketStatus("Submission saved locally. Configure Supabase to persist it.");
+    return true;
   }
 
   async function handleSubmissionVote({ bountyId, submissionId, vote }) {
@@ -941,10 +1035,14 @@ function App({ auth }) {
   function handleBountyImage(event) {
     const file = event.target.files?.[0];
     if (!file) return;
-    setForm((current) => ({
-      ...current,
-      image: URL.createObjectURL(file),
-    }));
+    setForm((current) => {
+      if (current.image?.startsWith("blob:")) URL.revokeObjectURL(current.image);
+      return {
+        ...current,
+        image: URL.createObjectURL(file),
+        imageFile: file,
+      };
+    });
   }
 
   async function handleSubmit(event) {
@@ -964,8 +1062,9 @@ function App({ auth }) {
     if (!connected) handleLoginClick();
     if (Object.keys(nextErrors).length > 0) return;
 
-    const nextBounty = {
-      id: String(Date.now()),
+    const bountyId = String(Date.now());
+    let nextBounty = {
+      id: bountyId,
       title: form.title.trim(),
       description: form.description.trim() || "No description provided yet.",
       category: form.category,
@@ -974,7 +1073,7 @@ function App({ auth }) {
       deadline: form.deadline,
       daysLeft: getDaysLeft(form.deadline),
       applicants: 0,
-      maxApplicants: Number(form.maxApplicants) || 1,
+      maxApplicants: 2147483647,
       status: "Open",
       poster: walletAddress,
       image: form.image,
@@ -984,6 +1083,19 @@ function App({ auth }) {
     };
 
     try {
+      if (form.imageFile) {
+        setBountySyncStatus("Uploading campaign image...");
+        const uploadedImage = await uploadBountyImage({
+          bountyId,
+          file: form.imageFile,
+          walletAddress,
+        });
+        nextBounty = {
+          ...nextBounty,
+          image: uploadedImage.imageUrl || form.image,
+        };
+      }
+
       setBountySyncStatus(
         nextBounty.fundingType === "Self-Funded Dare"
           ? "Approving and escrowing bounty funds..."
@@ -1062,10 +1174,19 @@ function App({ auth }) {
     setPage("Landing");
   }
 
-  function handleAcceptTerms() {
-    writeStoredAccount(userStorageKey, { termsAccepted: true });
-    setTermsAccepted(true);
-    setPage("SetupProfile");
+  async function handleAcceptTerms() {
+    setProfileStatus("Saving acceptance...");
+    try {
+      if (isSecureProfileStorageConfigured) {
+        await acceptTermsWithPrivy({ getAccessToken, walletAddress });
+      }
+      writeStoredAccount(userStorageKey, { termsAccepted: true });
+      setTermsAccepted(true);
+      setProfileStatus("");
+      setPage("SetupProfile");
+    } catch (error) {
+      setProfileStatus(error.message || "Could not save terms acceptance.");
+    }
   }
 
   return (
@@ -1111,6 +1232,7 @@ function App({ auth }) {
         {page === "Landing" && (
           <LandingPage
             bounties={bounties}
+            bountiesLoading={bountiesLoading}
             stats={stats}
             onCreate={() => setPage("Create")}
             onExplore={() => setPage("Explore")}
@@ -1121,6 +1243,7 @@ function App({ auth }) {
           <ExplorePage
             activeTab={activeTab}
             bounties={filteredBounties}
+            bountiesLoading={bountiesLoading}
             bountySyncStatus={bountySyncStatus}
             joinedIds={joinedIds}
             query={query}
@@ -1149,7 +1272,14 @@ function App({ auth }) {
         {page === "BountyDetails" && selectedBounty && (
           <BountyDetailsPage
             bounty={selectedBounty}
+            hasSubmitted={Boolean(
+              walletAddress &&
+                (submissions[selectedBounty.id] || []).some(
+                  (submission) => submission.walletAddress?.toLowerCase() === walletAddress.toLowerCase(),
+                ),
+            )}
             joined={joinedIds.includes(selectedBounty.id)}
+            joinError={joinErrors[selectedBounty.id] || ""}
             joining={joiningBountyIds.includes(selectedBounty.id)}
             marketStatus={marketStatus}
             submissionVotes={submissionVotes}
@@ -1182,8 +1312,8 @@ function App({ auth }) {
 
         {page === "Terms" && (
           <TermsPage
-            termsAccepted={termsAccepted}
             onAccept={handleAcceptTerms}
+            status={profileStatus}
           />
         )}
 
@@ -1205,6 +1335,8 @@ function App({ auth }) {
             profile={effectiveProfile}
             stats={stats}
             submissions={submissions}
+            wonBounties={wonBounties}
+            wallet={selectedWallet}
             walletAddress={walletAddress}
             onConnect={handleLoginClick}
             onCreate={() => setPage("Create")}
@@ -1223,15 +1355,15 @@ function App({ auth }) {
   );
 }
 
-function LandingPage({ bounties, stats, onCreate, onExplore }) {
+function LandingPage({ bounties, bountiesLoading, stats, onCreate, onExplore }) {
   const featured = bounties.slice(0, 3);
   const steps = [
     {
       title: "Post a clear dare",
-      body: "Describe the meme, edit, video, or template you need. Set the reward, deadline, and number of hunters who can join.",
+      body: "Describe the meme, edit, video, or template you need. Set the reward and deadline, then launch it for hunters.",
     },
     {
-      title: "Fund it with tokens",
+      title: "Fund it with memes/stocks",
       body: "Choose a supported token and funding type. Self-funded dares are backed by the poster, while community-funded dares can gather support.",
     },
     {
@@ -1260,7 +1392,7 @@ function LandingPage({ bounties, stats, onCreate, onExplore }) {
             <Meme2EarnWordmark />
           </h1>
           <p className="mt-6 max-w-2xl text-xl leading-8 text-muted">
-            Create funded meme dares with tokens, or join open bounties and earn for completed work.
+            Create funded meme dares with tokens, or join open dares and earn for completed work.
           </p>
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
             <button
@@ -1285,22 +1417,22 @@ function LandingPage({ bounties, stats, onCreate, onExplore }) {
         <div className="space-y-6">
           <div className="border-y border-line bg-white/72 py-6 backdrop-blur-sm">
             <div className="grid grid-cols-1 min-[420px]:grid-cols-3">
-              <Stat label="Open bounties" value={stats.open} />
-              <Stat label="Coins in play" value={stats.coins} />
-              <Stat label="Active hunters" value={stats.hunters} />
+              <Stat label="Open dares" value={stats.open} loading={bountiesLoading} />
+              <Stat label="Coins in play" value={stats.coins} loading={bountiesLoading} />
+              <Stat label="Active hunters" value={stats.hunters} loading={bountiesLoading} />
             </div>
           </div>
           <div className="grid gap-4 border-y border-line py-5 sm:grid-cols-2">
             <div>
               <p className="text-xs font-bold uppercase tracking-[0.16em] text-mutedFaint">For creators</p>
               <p className="mt-2 text-sm leading-6 text-muted">
-                Turn campaign needs into concrete dares with rewards, slots, deadlines, and a visible submission trail.
+                Turn campaign needs into concrete dares with rewards, deadlines, and a visible submission trail.
               </p>
             </div>
             <div>
               <p className="text-xs font-bold uppercase tracking-[0.16em] text-mutedFaint">For hunters</p>
               <p className="mt-2 text-sm leading-6 text-muted">
-                Find open meme work, join before slots fill, submit links, and build a profile around completed bounties.
+                Find open meme work, join a campaign, submit your video, and build a profile around completed bounties.
               </p>
             </div>
           </div>
@@ -1330,7 +1462,7 @@ function LandingPage({ bounties, stats, onCreate, onExplore }) {
         <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.16em] text-mutedFaint">Live dares</p>
-            <h2 className="mt-2 font-display text-3xl font-bold text-text">Funded work ready to claim.</h2>
+            <h2 className="mt-2 font-display text-3xl font-bold text-text">Funded dare ready to claim.</h2>
           </div>
           <button className="text-sm font-bold text-pink transition hover:text-text" type="button" onClick={onExplore}>
             View all
@@ -1387,9 +1519,9 @@ function LandingPage({ bounties, stats, onCreate, onExplore }) {
         </div>
         <div className="border-t border-line pt-5">
           <Clock3 size={18} className="text-pink" />
-          <h3 className="mt-4 font-display text-2xl font-bold text-text">Deadlines and filled slots</h3>
+          <h3 className="mt-4 font-display text-2xl font-bold text-text">Deadlines and participation</h3>
           <p className="mt-3 text-sm leading-6 text-muted">
-            Every row shows time left, hunter capacity, current status, and the reward before a hunter opens the full dare.
+            Every row shows time left, participating hunters, current status, and the reward before a hunter opens the full dare.
           </p>
         </div>
         <div className="border-t border-line pt-5">
@@ -1439,6 +1571,7 @@ function Meme2EarnWordmark() {
 function ExplorePage({
   activeTab,
   bounties,
+  bountiesLoading,
   bountySyncStatus,
   joinedIds,
   query,
@@ -1465,9 +1598,9 @@ function ExplorePage({
         </div>
 
         <div className="grid grid-cols-1 min-[420px]:grid-cols-3">
-          <Stat label="Open bounties" value={stats.open} />
-          <Stat label="Coins in play" value={stats.coins} />
-          <Stat label="Active hunters" value={stats.hunters} />
+          <Stat label="Open dares" value={stats.open} loading={bountiesLoading} />
+          <Stat label="Coins in play" value={stats.coins} loading={bountiesLoading} />
+          <Stat label="Active hunters" value={stats.hunters} loading={bountiesLoading} />
         </div>
       </section>
 
@@ -1519,6 +1652,7 @@ function ExplorePage({
         <BountyTable
           bounties={bounties}
           joinedIds={joinedIds}
+          loading={bountiesLoading}
           onOpenBounty={onOpenBounty}
         />
       </section>
@@ -1610,6 +1744,9 @@ function M2ETVPage({ items, onCreate, onOpenBounty }) {
 }
 
 function CreatePage({ bountySyncStatus, errors, form, onChange, onImageChange, onSubmit }) {
+  const creatorFee = form.fundingType === "Self-Funded Dare" ? calculateCreatorFee(form.reward) : 0;
+  const totalLaunchAmount = (Number(form.reward) || 0) + creatorFee;
+
   return (
     <section className="grid gap-8 lg:grid-cols-[0.85fr_1.15fr]">
       <div className="border-b border-line pb-8 lg:border-b-0 lg:border-r lg:pr-8">
@@ -1744,7 +1881,7 @@ function CreatePage({ bountySyncStatus, errors, form, onChange, onImageChange, o
           </Field>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+        <div>
           <div>
             <p className="mb-2 text-xs font-bold uppercase tracking-[0.13em] text-muted">Bounty amount</p>
             <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_13rem] sm:gap-0">
@@ -1775,16 +1912,23 @@ function CreatePage({ bountySyncStatus, errors, form, onChange, onImageChange, o
             {errors.reward || errors.coin ? (
               <p className="mt-2 text-sm text-pink">{errors.reward || errors.coin}</p>
             ) : null}
+            {creatorFee > 0 ? (
+              <div className="mt-3 border border-line bg-ink px-3 py-2 text-xs leading-6 text-muted">
+                <div className="flex items-center justify-between gap-3">
+                  <span>Creator launch fee</span>
+                  <span className="font-mono text-gold">
+                    {formatReward(creatorFee)} ${form.coin}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span>Total needed</span>
+                  <span className="font-mono text-text">
+                    {formatReward(totalLaunchAmount)} ${form.coin}
+                  </span>
+                </div>
+              </div>
+            ) : null}
           </div>
-          <Field label="Max hunters">
-            <input
-              className="h-11 w-full border border-line bg-surface px-3 font-mono text-sm text-text"
-              min="1"
-              type="number"
-              value={form.maxApplicants}
-              onChange={(event) => onChange({ ...form, maxApplicants: event.target.value })}
-            />
-          </Field>
         </div>
 
         <button className="h-12 w-full bg-pink text-sm font-bold text-ink transition hover:bg-text" type="submit">
@@ -1795,7 +1939,10 @@ function CreatePage({ bountySyncStatus, errors, form, onChange, onImageChange, o
   );
 }
 
-function TermsPage({ termsAccepted, onAccept }) {
+function TermsPage({ onAccept, status = "" }) {
+  const [agreed, setAgreed] = useState(false);
+  const saving = status === "Saving acceptance...";
+
   return (
     <section className="mx-auto max-w-3xl">
       <div className="border-b border-line pb-8">
@@ -1824,21 +1971,21 @@ function TermsPage({ termsAccepted, onAccept }) {
           <input
             className="mt-1 h-4 w-4 accent-pink"
             type="checkbox"
-            checked={termsAccepted}
-            onChange={(event) => {
-              if (event.target.checked) onAccept();
-            }}
+            checked={agreed}
+            onChange={(event) => setAgreed(event.target.checked)}
           />
           <span>I have read and agree to the terms and conditions.</span>
         </label>
 
         <button
-          className="h-12 w-full bg-pink text-sm font-bold text-ink transition hover:bg-text"
+          className="h-12 w-full bg-pink text-sm font-bold text-ink transition hover:bg-text disabled:cursor-not-allowed disabled:bg-raised disabled:text-muted"
           type="button"
           onClick={onAccept}
+          disabled={!agreed || saving}
         >
-          Continue
+          {saving ? "Saving..." : "Continue"}
         </button>
+        {status ? <p className="text-sm text-muted">{status}</p> : null}
       </div>
     </section>
   );
@@ -1906,6 +2053,8 @@ function ProfilePage({
   profile,
   stats,
   submissions = {},
+  wonBounties = [],
+  wallet,
   walletAddress,
   onConnect,
   onCreate,
@@ -1914,6 +2063,12 @@ function ProfilePage({
   onSelectWinner,
 }) {
   const totalPostedRewards = postedBounties.reduce((sum, bounty) => sum + bounty.reward, 0);
+  const earnedByCoin = wonBounties.reduce((totals, bounty) => {
+    const coin = bounty.coin || "Token";
+    totals[coin] = (totals[coin] || 0) + Number(bounty.reward || 0);
+    return totals;
+  }, {});
+  const earnedTokens = Object.entries(earnedByCoin);
   const [expandedBountyId, setExpandedBountyId] = useState(postedBounties[0]?.id || "");
   const [sendForm, setSendForm] = useState({
     recipient: "",
@@ -1923,13 +2078,67 @@ function ProfilePage({
   const [walletOpen, setWalletOpen] = useState(false);
   const [walletStatus, setWalletStatus] = useState("");
   const [walletError, setWalletError] = useState("");
-  const selectedTokenBalance = "0.00";
+  const [walletBalances, setWalletBalances] = useState({});
+  const [walletBalancesLoading, setWalletBalancesLoading] = useState(false);
+  const [walletBalancesError, setWalletBalancesError] = useState("");
+  const [walletBalanceRefresh, setWalletBalanceRefresh] = useState(0);
+  const [walletSending, setWalletSending] = useState(false);
+  const [walletTransaction, setWalletTransaction] = useState(null);
+  const selectedTokenBalance = walletBalances[sendForm.token] || "0.00";
+  const selectedTokenBalanceLabel =
+    selectedTokenBalance === "Unavailable" ? "Unavailable" : `${selectedTokenBalance} ${sendForm.token}`;
 
   useEffect(() => {
     if (!expandedBountyId && postedBounties[0]?.id) {
       setExpandedBountyId(postedBounties[0].id);
     }
   }, [expandedBountyId, postedBounties]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadWalletBalances() {
+      if (!walletOpen || !walletAddress) return;
+
+      setWalletBalancesLoading(true);
+      setWalletBalancesError("");
+
+      const balanceResults = await Promise.allSettled(
+        TOKEN_OPTIONS.map(async (token) => {
+          const tokenAddress = getTokenAddress(token);
+          const balance = await getTokenBalance({ tokenAddress, walletAddress });
+          return [token, formatTokenBalance(balance.formatted)];
+        }),
+      );
+
+      if (cancelled) return;
+
+      const nextBalances = {};
+      const failedTokens = [];
+      balanceResults.forEach((result, index) => {
+        const token = TOKEN_OPTIONS[index];
+        if (result.status === "fulfilled") {
+          const [symbol, balance] = result.value;
+          nextBalances[symbol] = balance;
+        } else {
+          nextBalances[token] = "Unavailable";
+          failedTokens.push(token);
+        }
+      });
+
+      setWalletBalances(nextBalances);
+      setWalletBalancesError(
+        failedTokens.length ? `Could not load balances for ${failedTokens.join(", ")}.` : "",
+      );
+      setWalletBalancesLoading(false);
+    }
+
+    loadWalletBalances();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [walletAddress, walletBalanceRefresh, walletOpen]);
 
   async function handleCopyAddress() {
     if (!walletAddress) return;
@@ -1943,7 +2152,7 @@ function ProfilePage({
     }
   }
 
-  function handleSendToken(event) {
+  async function handleSendToken(event) {
     event.preventDefault();
     const amount = Number(sendForm.amount);
     const recipient = sendForm.recipient.trim();
@@ -1966,11 +2175,37 @@ function ProfilePage({
       return;
     }
 
+    if (!wallet) {
+      setWalletError("Your embedded wallet is not ready yet. Try again in a moment.");
+      setWalletStatus("");
+      return;
+    }
+
+    const tokenAddress = getTokenAddress(sendForm.token);
+    const transferSummary = `${sendForm.amount} ${sendForm.token} to ${truncateAddress(recipient)}`;
     setWalletError("");
-    setWalletStatus(
-      `Transfer ready: ${sendForm.amount} ${sendForm.token} to ${truncateAddress(recipient)}.`,
-    );
-    setSendForm((current) => ({ ...current, recipient: "", amount: "" }));
+    setWalletTransaction(null);
+    setWalletSending(true);
+    setWalletStatus(`Confirm ${transferSummary} in your wallet.`);
+
+    try {
+      const result = await transferToken({
+        amount: sendForm.amount,
+        recipient,
+        tokenAddress,
+        wallet,
+      });
+      setWalletStatus(`Sent ${transferSummary}.`);
+      setWalletTransaction(result);
+      setSendForm((current) => ({ ...current, recipient: "", amount: "" }));
+      setWalletBalanceRefresh((current) => current + 1);
+    } catch (error) {
+      const rejected = error?.code === 4001 || error?.code === "ACTION_REJECTED";
+      setWalletError(rejected ? "Transaction cancelled." : error?.shortMessage || error?.message || "Token transfer failed.");
+      setWalletStatus("");
+    } finally {
+      setWalletSending(false);
+    }
   }
 
   return (
@@ -2025,9 +2260,36 @@ function ProfilePage({
       <div className="grid border border-line bg-surface min-[420px]:grid-cols-2 sm:grid-cols-4">
         <Stat label="Joined" value={joinedBounties.length} />
         <Stat label="Posted" value={postedBounties.length} />
-        <Stat label="Open market" value={stats.open} />
+        <Stat label="Open dares" value={stats.open} />
         <Stat label="Posted rewards" value={totalPostedRewards ? formatReward(totalPostedRewards) : 0} />
       </div>
+
+      <section className="border-y border-line py-6">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p className="mb-3 inline-flex items-center gap-2 text-sm font-bold uppercase tracking-[0.16em] text-muted">
+              <Trophy size={16} className="text-gold" />
+              Earnings
+            </p>
+            <h2 className="font-display text-3xl font-bold text-text">Total earned</h2>
+            <p className="mt-2 text-sm text-muted">{wonBounties.length} dare {wonBounties.length === 1 ? "win" : "wins"}</p>
+          </div>
+          {earnedTokens.length > 0 ? (
+            <div className="flex flex-wrap gap-x-6 gap-y-4 sm:justify-end">
+              {earnedTokens.map(([coin, amount]) => (
+                <div key={coin} className="flex items-center gap-2">
+                  <TokenLogo token={coin} size="sm" />
+                  <p className="font-mono text-2xl font-bold text-gold">
+                    {formatReward(amount)} ${coin}
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="font-mono text-2xl font-bold text-gold">0</p>
+          )}
+        </div>
+      </section>
 
       <section className="flex flex-col gap-4 border-y border-line py-6 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -2086,8 +2348,11 @@ function ProfilePage({
               <div className="border-b border-line px-4 py-4 sm:border-b-0 sm:border-r">
                 <p className="text-xs font-bold uppercase tracking-[0.13em] text-mutedFaint">Available balance</p>
                 <p className="mt-2 break-words font-mono text-2xl font-bold text-gold">
-                  {selectedTokenBalance} {sendForm.token}
+                  {walletBalancesLoading ? "Loading..." : selectedTokenBalanceLabel}
                 </p>
+                {walletBalancesError ? (
+                  <p className="mt-2 text-xs leading-5 text-muted">{walletBalancesError}</p>
+                ) : null}
               </div>
               <div className="px-4 py-4">
                 <p className="text-xs font-bold uppercase tracking-[0.13em] text-mutedFaint">Wallet</p>
@@ -2131,6 +2396,16 @@ function ProfilePage({
                 {walletStatus ? (
                   <div className="border border-line bg-ink px-3 py-2 text-sm font-bold text-muted">
                     {walletStatus}
+                    {walletTransaction?.explorerUrl ? (
+                      <a
+                        className="ml-2 text-pink underline underline-offset-4 hover:text-text"
+                        href={walletTransaction.explorerUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        View transaction
+                      </a>
+                    ) : null}
                   </div>
                 ) : null}
 
@@ -2177,10 +2452,10 @@ function ProfilePage({
                 <button
                   className="inline-flex h-11 w-full items-center justify-center gap-2 bg-pink text-sm font-bold text-ink transition hover:bg-text disabled:cursor-not-allowed disabled:bg-raised disabled:text-muted"
                   type="submit"
-                  disabled={!connected}
+                  disabled={!connected || !wallet || walletSending || selectedTokenBalance === "Unavailable"}
                 >
                   <Send size={16} />
-                  Send tokens
+                  {walletSending ? "Sending..." : "Send tokens"}
                 </button>
               </form>
             </div>
@@ -2189,7 +2464,12 @@ function ProfilePage({
       ) : null}
 
       <div className="grid gap-8 lg:grid-cols-2">
-        <ProfileList title="Joined bounties" empty="Joined bounties will appear here." bounties={joinedBounties} />
+        <ProfileList
+          title="Joined bounties"
+          empty="Joined bounties will appear here."
+          bounties={joinedBounties}
+          onOpenBounty={onOpenBounty}
+        />
         <CreatorBountyPanel
           bounties={postedBounties}
           empty="Posted bounties will appear here."
@@ -2205,7 +2485,7 @@ function ProfilePage({
   );
 }
 
-function BountyTable({ bounties, joinedIds, onOpenBounty }) {
+function BountyTable({ bounties, joinedIds, loading = false, onOpenBounty }) {
   return (
     <>
       <div className="hidden grid-cols-[minmax(0,1.55fr)_11rem_7rem_8rem_minmax(12rem,0.75fr)_2rem] gap-5 border-b border-line px-1 py-3 text-xs font-bold uppercase tracking-[0.14em] text-mutedFaint min-[860px]:grid">
@@ -2217,7 +2497,19 @@ function BountyTable({ bounties, joinedIds, onOpenBounty }) {
         <span />
       </div>
 
-      {bounties.length > 0 ? (
+      {loading ? (
+        <div className="border-b border-line" aria-label="Loading dare campaigns">
+          {[0, 1, 2].map((row) => (
+            <div key={row} className="grid gap-4 border-t border-line px-1 py-7 first:border-t-0 min-[860px]:grid-cols-[minmax(0,1.55fr)_11rem_7rem_8rem_minmax(12rem,0.75fr)_2rem]">
+              <span className="h-7 animate-pulse bg-line" />
+              <span className="h-5 animate-pulse bg-line" />
+              <span className="h-5 animate-pulse bg-line" />
+              <span className="h-5 animate-pulse bg-line" />
+              <span className="h-7 animate-pulse bg-line" />
+            </div>
+          ))}
+        </div>
+      ) : bounties.length > 0 ? (
         <div className="border-b border-line">
           {bounties.map((bounty) => (
             <BountyRow
@@ -2240,13 +2532,18 @@ function BountyTable({ bounties, joinedIds, onOpenBounty }) {
   );
 }
 
-function ProfileList({ title, empty, bounties }) {
+function ProfileList({ title, empty, bounties, onOpenBounty }) {
   return (
     <div className="border-t border-line">
       <h2 className="py-4 font-display text-2xl font-bold text-text">{title}</h2>
       {bounties.length > 0 ? (
         bounties.map((bounty) => (
-          <div key={bounty.id} className="grid gap-3 border-t border-line py-4 sm:grid-cols-[1fr_auto] sm:items-center">
+          <button
+            key={bounty.id}
+            className="grid w-full gap-3 border-t border-line px-1 py-4 text-left transition hover:bg-surface/35 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink sm:grid-cols-[minmax(0,1fr)_auto_1.5rem] sm:items-center"
+            type="button"
+            onClick={() => onOpenBounty?.(bounty.id)}
+          >
             <div>
               <p className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.13em] text-muted">
                 <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: CATEGORY_COLORS[bounty.category] }} />
@@ -2255,7 +2552,8 @@ function ProfileList({ title, empty, bounties }) {
               <h3 className="font-display text-xl font-bold text-text">{bounty.title}</h3>
             </div>
             <RewardAmount amount={bounty.reward} coin={bounty.coin} align="right" />
-          </div>
+            <ChevronRight className="hidden text-muted sm:block" size={20} />
+          </button>
         ))
       ) : (
         <div className="border-t border-line py-10 text-sm text-muted">{empty}</div>
@@ -2408,13 +2706,52 @@ function CreatorSubmissionRow({ bounty, creatorDecides, onSelectWinner, selected
   );
 }
 
-function Stat({ label, value }) {
+function Stat({ label, loading = false, value }) {
   return (
     <div className="min-w-0 border-b border-line px-4 py-4 last:border-b-0 min-[420px]:border-b-0 min-[420px]:border-r min-[420px]:py-1 min-[420px]:last:border-r-0 sm:px-6">
-      <p className="break-words font-mono text-3xl font-bold text-pink sm:text-4xl">{value}</p>
+      <p className="break-words font-mono text-3xl font-bold text-pink sm:text-4xl" aria-busy={loading}>
+        <AnimatedNumber value={loading ? 0 : value} />
+      </p>
       <p className="mt-2 text-xs font-bold uppercase tracking-[0.13em] text-muted">{label}</p>
     </div>
   );
+}
+
+function AnimatedNumber({ value }) {
+  const numericValue = typeof value === "number" ? value : Number(String(value).replace(/,/g, ""));
+  const [displayValue, setDisplayValue] = useState(Number.isFinite(numericValue) ? 0 : value);
+
+  useEffect(() => {
+    if (!Number.isFinite(numericValue)) {
+      setDisplayValue(value);
+      return undefined;
+    }
+
+    const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    if (reduceMotion || numericValue === 0) {
+      setDisplayValue(numericValue);
+      return undefined;
+    }
+
+    const duration = 850;
+    const startedAt = performance.now();
+    let frameId;
+
+    const update = (now) => {
+      const progress = Math.min(1, (now - startedAt) / duration);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setDisplayValue(Math.round(numericValue * eased));
+      if (progress < 1) frameId = window.requestAnimationFrame(update);
+    };
+
+    setDisplayValue(0);
+    frameId = window.requestAnimationFrame(update);
+    return () => window.cancelAnimationFrame(frameId);
+  }, [numericValue, value]);
+
+  return Number.isFinite(Number(displayValue))
+    ? new Intl.NumberFormat("en-US").format(Number(displayValue))
+    : displayValue;
 }
 
 function TokenLogo({ size = "md", token }) {
@@ -2467,7 +2804,7 @@ function TokenLogo({ size = "md", token }) {
 }
 
 function RewardAmount({ amount, align = "left", coin, size = "md" }) {
-  const textSize = size === "lg" ? "text-4xl sm:text-5xl" : size === "row" ? "text-2xl min-[860px]:text-3xl" : "text-2xl";
+  const textSize = size === "lg" ? "text-4xl sm:text-5xl" : size === "row" ? "text-xl min-[860px]:text-2xl" : "text-2xl";
 
   return (
     <div className={`flex min-w-0 items-center gap-3 ${align === "right" ? "justify-start sm:justify-end" : ""}`}>
@@ -2501,7 +2838,7 @@ function BountyRow({ bounty, joined, onOpen }) {
           <h2 className="font-display text-2xl font-bold leading-tight text-text">{bounty.title}</h2>
         </div>
 
-        <HunterProgress applicants={bounty.applicants} maxApplicants={bounty.maxApplicants} />
+        <HunterProgress applicants={bounty.applicants} />
         <Metric icon={<Clock3 size={17} />} value={bounty.status === "Completed" ? "Done" : `${bounty.daysLeft}d`} urgent={urgent} />
         <StatusPill status={bounty.status} />
         <RewardAmount amount={bounty.reward} coin={bounty.coin} align="right" size="row" />
@@ -2515,7 +2852,9 @@ function BountyRow({ bounty, joined, onOpen }) {
 
 function BountyDetailsPage({
   bounty,
+  hasSubmitted = false,
   joined,
+  joinError = "",
   joining = false,
   marketStatus = "",
   submissionVotes = {},
@@ -2531,8 +2870,9 @@ function BountyDetailsPage({
   const [submissionNote, setSubmissionNote] = useState("");
   const [submissionVideo, setSubmissionVideo] = useState(null);
   const [submissionVideoPreview, setSubmissionVideoPreview] = useState("");
-  const isFull = bounty.applicants >= bounty.maxApplicants;
-  const canSubmit = joined && bounty.status !== "Completed";
+  const [submissionUploading, setSubmissionUploading] = useState(false);
+  const showSubmissionForm = joined && bounty.status !== "Completed";
+  const canSubmit = showSubmissionForm && !hasSubmitted;
   const urgent = bounty.daysLeft <= 3 && bounty.status !== "Completed";
   const communityDecides = (bounty.winnerSelection || "Community decides") === "Community decides";
   const communityFunded = bounty.fundingType === "Community-Funded Dare";
@@ -2550,9 +2890,7 @@ function BountyDetailsPage({
     () => submissions.find((submission) => submission.id === bounty.winnerSubmissionId) || null,
     [bounty.winnerSubmissionId, submissions],
   );
-  const voteClosed = bounty.status === "Completed" || bounty.daysLeft <= 0;
-  const canFinalizeCommunityWinner =
-    communityDecides && bounty.status !== "Completed" && bounty.daysLeft <= 0 && submissions.length > 0 && voteLeader;
+  const voteClosed = bounty.status === "Completed" || hasDeadlinePassed(bounty.deadline);
 
   useEffect(() => {
     return () => {
@@ -2567,10 +2905,15 @@ function BountyDetailsPage({
     setSubmissionVideoPreview(file ? URL.createObjectURL(file) : "");
   }
 
-  function handleSubmission(event) {
+  async function handleSubmission(event) {
     event.preventDefault();
-    if (!canSubmit || !submissionVideo) return;
-    onSubmitDare?.({ note: submissionNote, videoFile: submissionVideo });
+    if (!canSubmit || !submissionVideo || submissionUploading) return;
+
+    setSubmissionUploading(true);
+    const submitted = await onSubmitDare?.({ note: submissionNote, videoFile: submissionVideo });
+    setSubmissionUploading(false);
+    if (submitted === false) return;
+
     if (submissionVideoPreview) URL.revokeObjectURL(submissionVideoPreview);
     setSubmissionNote("");
     setSubmissionVideo(null);
@@ -2622,8 +2965,8 @@ function BountyDetailsPage({
           ) : null}
 
           {bounty.image ? (
-            <div className="overflow-hidden border border-line bg-surface">
-              <img className="max-h-[28rem] w-full object-cover" src={bounty.image} alt="" />
+            <div className="aspect-video w-full max-w-2xl overflow-hidden border border-line bg-surface">
+              <img className="h-full max-h-[22rem] w-full object-cover" src={bounty.image} alt="" />
             </div>
           ) : null}
 
@@ -2632,14 +2975,13 @@ function BountyDetailsPage({
             <p className="max-w-3xl text-sm leading-7 text-muted">{bounty.description}</p>
           </div>
 
-          <div className="grid grid-cols-2 gap-4 border-y border-line py-4 md:grid-cols-3 xl:grid-cols-7">
+          <div className="grid grid-cols-2 gap-4 border-y border-line py-4 md:grid-cols-3 xl:grid-cols-6">
             <Detail label="Poster" value={truncateAddress(bounty.poster)} />
             <Detail label="Funding" value={bounty.fundingType || "Self-Funded Dare"} />
             <Detail label="Winner selection" value={bounty.winnerSelection || "Community decides"} />
             <Detail label="Deadline" value={bounty.deadline || "Open"} />
-            <Detail label="Slots" value={`${bounty.applicants}/${bounty.maxApplicants}`} />
+            <Detail label="Hunters" value={bounty.applicants} />
             <Detail label="Reward" value={`${formatReward(bounty.reward)} $${bounty.coin}`} highlight />
-            <Detail label="Escrow" value={bounty.escrowStatus || "Not created"} />
           </div>
 
           <div>
@@ -2658,24 +3000,6 @@ function BountyDetailsPage({
                   {voteClosed ? "Winner by community vote" : "Current leader"}
                 </span>
                 <span className="ml-2 font-mono text-gold">{Number(voteLeader.score) || 0}</span>
-              </div>
-            ) : null}
-            {canFinalizeCommunityWinner ? (
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border border-gold/40 bg-surface px-4 py-3">
-                <div>
-                  <p className="text-sm font-bold text-text">Community voting has closed.</p>
-                  <p className="mt-1 text-sm text-muted">
-                    Finalize the top-voted submission and release escrow.
-                  </p>
-                </div>
-                <button
-                  className="inline-flex h-10 items-center justify-center gap-2 bg-gold px-4 text-sm font-bold text-ink transition hover:bg-text"
-                  type="button"
-                  onClick={onFinalizeCommunityWinner}
-                >
-                  <Trophy size={16} />
-                  Finalize community winner
-                </button>
               </div>
             ) : null}
             {selectedWinner ? (
@@ -2759,26 +3083,31 @@ function BountyDetailsPage({
               </div>
             </form>
           ) : null}
-          <HunterProgress applicants={bounty.applicants} maxApplicants={bounty.maxApplicants} />
+          <HunterProgress applicants={bounty.applicants} />
           <button
             className="h-11 w-full bg-pink px-5 text-sm font-bold text-ink transition hover:bg-text disabled:cursor-not-allowed disabled:bg-raised disabled:text-muted"
             type="button"
-            disabled={joining || isFull || joined || bounty.status === "Completed"}
+            disabled={joining || joined || bounty.status === "Completed"}
             onClick={onJoin}
           >
-            {joining ? "Joining Bounty" : joined ? "Joined" : isFull ? "Full" : bounty.status === "Completed" ? "Closed" : "Join bounty"}
+            {joining ? "Joining Bounty" : joined ? "Joined" : bounty.status === "Completed" ? "Closed" : "Join bounty"}
           </button>
+          {joinError ? <p className="text-sm leading-6 text-muted">{joinError}</p> : null}
 
-          {canSubmit ? (
+          {showSubmissionForm ? (
             <form className="space-y-3" onSubmit={handleSubmission}>
               <label className="block">
                 <span className="mb-2 block text-xs font-bold uppercase tracking-[0.13em] text-mutedFaint">Upload video</span>
-                <input
-                  className="block w-full cursor-pointer border border-line bg-surface text-sm text-muted file:mr-4 file:h-11 file:border-0 file:bg-pink file:px-4 file:text-sm file:font-bold file:text-ink hover:file:bg-text"
-                  accept="video/*"
-                  type="file"
-                  onChange={handleVideoChange}
-                />
+                <span className="inline-flex h-11 cursor-pointer items-center justify-center bg-pink px-4 text-sm font-bold text-ink transition hover:bg-text">
+                  {submissionVideo ? "Video ready" : "Upload video"}
+                  <input
+                    className="sr-only"
+                    accept="video/*"
+                    type="file"
+                    onChange={handleVideoChange}
+                    disabled={hasSubmitted || submissionUploading}
+                  />
+                </span>
               </label>
               {submissionVideoPreview ? (
                 <video className="max-h-56 w-full border border-line bg-black object-contain" src={submissionVideoPreview} controls />
@@ -2790,14 +3119,24 @@ function BountyDetailsPage({
                   placeholder="Optional note, context, or proof of completion."
                   value={submissionNote}
                   onChange={(event) => setSubmissionNote(event.target.value)}
+                  disabled={hasSubmitted || submissionUploading}
                 />
               </label>
               <button
                 className="h-11 w-full border border-line text-sm font-bold text-text transition hover:border-pink hover:text-pink disabled:cursor-not-allowed disabled:text-mutedFaint"
                 type="submit"
-                disabled={!submissionVideo}
+                disabled={hasSubmitted || !submissionVideo || submissionUploading}
               >
-                Submit video
+                {hasSubmitted ? (
+                  "Submitted"
+                ) : submissionUploading ? (
+                  <span className="inline-flex items-center justify-center gap-2">
+                    <LoaderCircle className="animate-spin" size={17} />
+                    Uploading video...
+                  </span>
+                ) : (
+                  "Submit video"
+                )}
               </button>
             </form>
           ) : null}
@@ -2833,11 +3172,6 @@ function SubmissionVideo({ featured = false, submission }) {
         preload="metadata"
         src={submission.videoUrl}
       />
-      <div className="border-t border-line bg-surface px-3 py-2">
-        <p className="truncate font-mono text-xs font-bold text-muted">
-          {submission.videoName || "Submitted video"}
-        </p>
-      </div>
     </div>
   );
 }
@@ -2896,18 +3230,11 @@ function Metric({ icon, value, urgent = false }) {
   );
 }
 
-function HunterProgress({ applicants, maxApplicants }) {
-  const percent = Math.min(100, Math.round((applicants / maxApplicants) * 100));
-
+function HunterProgress({ applicants }) {
   return (
-    <div className="space-y-2">
-      <div className="flex items-baseline justify-between gap-3 font-mono text-sm font-bold text-muted">
-        <span>{applicants}/{maxApplicants}</span>
-        <span className="text-xs text-mutedFaint">hunters</span>
-      </div>
-      <div className="h-px w-full bg-line">
-        <div className="h-px bg-lime" style={{ width: `${percent}%` }} />
-      </div>
+    <div className="flex items-baseline justify-between gap-3 font-mono text-sm font-bold text-muted">
+      <span>{applicants}</span>
+      <span className="text-xs text-mutedFaint">hunters</span>
     </div>
   );
 }

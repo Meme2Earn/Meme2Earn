@@ -6,6 +6,27 @@ import "./styles.css";
 
 const privyAppId = import.meta.env.VITE_PRIVY_APP_ID;
 const hasPrivyAppId = Boolean(privyAppId && privyAppId !== "your_privy_app_id_here");
+const robinhoodTestnet = {
+  id: 46630,
+  name: "Robinhood Testnet",
+  nativeCurrency: {
+    decimals: 18,
+    name: "Ether",
+    symbol: "ETH",
+  },
+  rpcUrls: {
+    default: {
+      http: ["https://rpc.testnet.chain.robinhood.com"],
+    },
+  },
+  blockExplorers: {
+    default: {
+      name: "Robinhood Testnet Explorer",
+      url: "https://explorer.testnet.chain.robinhood.com",
+    },
+  },
+  testnet: true,
+};
 
 function PrivyConnectedApp() {
   const { ready, authenticated, logout, user } = usePrivy();
@@ -44,6 +65,8 @@ createRoot(document.getElementById("root")).render(
       <PrivyProvider
         appId={privyAppId}
         config={{
+          defaultChain: robinhoodTestnet,
+          supportedChains: [robinhoodTestnet],
           loginMethods: ["twitter"],
           embeddedWallets: {
             ethereum: {
