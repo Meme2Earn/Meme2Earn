@@ -1468,10 +1468,6 @@ function LandingPage({ bounties, bountiesLoading, stats, onCreate, onExplore }) 
     <section className="space-y-16">
       <div className="grid min-h-[calc(100vh-8rem)] gap-10 py-6 sm:py-8 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
         <div>
-          <p className="mb-5 inline-flex items-center gap-2 text-sm font-bold uppercase tracking-[0.16em] text-pink">
-            <Sparkles size={16} />
-            Meme bounties funded onchain
-          </p>
           <h1 className="max-w-4xl font-display text-5xl font-bold leading-[0.94] tracking-normal text-text sm:text-7xl lg:text-8xl">
             <Meme2EarnWordmark />
           </h1>
@@ -2360,64 +2356,66 @@ function ProfilePage({
 
   return (
     <section className="space-y-8">
-      <div className="grid gap-8 border-b border-line pb-8 lg:grid-cols-[1fr_0.9fr] lg:items-end">
-        <div className="flex flex-col gap-5 sm:flex-row sm:items-end">
-          <div className="grid h-24 w-24 shrink-0 place-items-center overflow-hidden rounded-full border border-line bg-surface">
+      <div className="border-b border-line pb-8">
+        <div className="flex items-start gap-4 sm:gap-5">
+          <div className="grid h-20 w-20 shrink-0 place-items-center overflow-hidden rounded-full border border-line bg-surface">
             {connected && profile.avatar ? (
               <img className="h-full w-full object-cover" src={profile.avatar} alt="" />
             ) : (
-              <User size={34} className="text-mutedFaint" />
+              <User size={30} className="text-mutedFaint" />
             )}
           </div>
-          <div>
-          <p className="mb-4 inline-flex items-center gap-2 text-sm font-bold uppercase tracking-[0.16em] text-muted">
-            <User size={16} className="text-pink" />
-            Profile
-          </p>
-          <h1 className="break-words font-display text-4xl font-bold leading-tight text-text sm:text-6xl">
-            {connected ? profile.username || truncateAddress(walletAddress) : "Wallet not connected"}
-          </h1>
-          <p className="mt-5 max-w-2xl text-base leading-7 text-muted">
-            Track bounties you joined, briefs you posted, and basic activity from the current session.
-          </p>
+          <div className="min-w-0 flex-1">
+            <p className="mb-2 inline-flex items-center gap-2 text-sm font-bold uppercase tracking-[0.16em] text-muted">
+              <User size={16} className="text-pink" />
+              Profile
+            </p>
+            <h1 className="break-words font-display text-3xl font-bold leading-tight text-text sm:text-5xl">
+              {connected ? profile.username || truncateAddress(walletAddress) : "Wallet not connected"}
+            </h1>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                className={`inline-flex h-10 items-center justify-center gap-2 px-3 text-xs font-bold transition sm:h-11 sm:px-5 sm:text-sm ${
+                  connected
+                    ? "bg-pink text-ink hover:bg-text"
+                    : "border border-line bg-transparent text-text hover:border-pink hover:text-pink"
+                }`}
+                type="button"
+                onClick={connected ? onCreate : onConnect}
+              >
+                {connected ? <Plus size={16} /> : <User size={16} />}
+                <span className="sm:hidden">{connected ? "Create" : "Login"}</span>
+                <span className="hidden sm:inline">{connected ? "Create bounty" : "Login"}</span>
+              </button>
+              {connected ? (
+                <button
+                  className="inline-flex h-10 items-center justify-center gap-2 border border-line px-3 text-xs font-bold text-text transition hover:border-pink hover:text-pink sm:h-11 sm:px-5 sm:text-sm"
+                  type="button"
+                  onClick={() => {
+                    setWalletToolTab("receive");
+                    setWalletOpen(true);
+                  }}
+                >
+                  <Wallet size={16} />
+                  <span className="sm:hidden">Wallet</span>
+                  <span className="hidden sm:inline">Wallet tools</span>
+                </button>
+              ) : null}
+              {connected ? (
+                <button
+                  className="inline-flex h-10 items-center justify-center border border-line px-3 text-xs font-bold text-text transition hover:border-pink hover:text-pink sm:h-11 sm:px-5 sm:text-sm"
+                  type="button"
+                  onClick={onLogout}
+                >
+                  Log out
+                </button>
+              ) : null}
+            </div>
           </div>
         </div>
-        <div className="flex flex-col gap-3 sm:flex-row lg:justify-self-end">
-          <button
-            className={`inline-flex h-11 items-center justify-center gap-2 px-5 text-sm font-bold transition ${
-              connected
-                ? "bg-pink text-ink hover:bg-text"
-                : "border border-line bg-transparent text-text hover:border-pink hover:text-pink"
-            }`}
-            type="button"
-            onClick={connected ? onCreate : onConnect}
-          >
-            {connected ? <Plus size={17} /> : <User size={17} />}
-            {connected ? "Create bounty" : "Login"}
-          </button>
-          {connected ? (
-            <button
-              className="inline-flex h-11 items-center justify-center gap-2 border border-line px-5 text-sm font-bold text-text transition hover:border-pink hover:text-pink"
-              type="button"
-              onClick={() => {
-                setWalletToolTab("receive");
-                setWalletOpen(true);
-              }}
-            >
-              <Wallet size={16} />
-              Wallet tools
-            </button>
-          ) : null}
-          {connected ? (
-            <button
-              className="inline-flex h-11 items-center justify-center border border-line px-5 text-sm font-bold text-text transition hover:border-pink hover:text-pink"
-              type="button"
-              onClick={onLogout}
-            >
-              Log out
-            </button>
-          ) : null}
-        </div>
+        <p className="mt-5 max-w-2xl text-base leading-7 text-muted">
+          Track bounties you joined, briefs you posted, and basic activity from the current session.
+        </p>
       </div>
 
       <div className="ui-card grid overflow-hidden border border-line bg-surface min-[420px]:grid-cols-2 sm:grid-cols-4">
@@ -2551,10 +2549,21 @@ function ProfilePage({
               <div className="grid grid-cols-3 border border-line bg-surface">
               <div className="min-w-0 border-r border-line px-2 py-4 text-center sm:px-4">
                 <p className="text-xs font-bold uppercase tracking-[0.13em] text-mutedFaint">Selected token</p>
-                <div className="mt-2 flex min-w-0 items-center justify-center gap-2 sm:gap-3">
+                <label className="mt-2 flex min-w-0 cursor-pointer items-center justify-center gap-2 sm:gap-3">
                   <TokenLogo token={sendForm.token} />
-                  <p className="break-words font-mono text-base font-bold text-text sm:text-2xl">{sendForm.token}</p>
-                </div>
+                  <select
+                    aria-label="Selected token"
+                    className="min-w-0 max-w-full cursor-pointer bg-transparent py-1 font-mono text-base font-bold text-text outline-none sm:text-2xl"
+                    value={sendForm.token}
+                    onChange={(event) => setSendForm({ ...sendForm, token: event.target.value })}
+                  >
+                    {TOKEN_OPTIONS.map((token) => (
+                      <option key={token} value={token}>
+                        {token}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </div>
               <div className="min-w-0 border-r border-line px-2 py-4 text-center sm:px-4">
                 <p className="text-xs font-bold uppercase tracking-[0.13em] text-mutedFaint">Available balance</p>
@@ -2576,12 +2585,16 @@ function ProfilePage({
               ) : null}
             </div>
 
-            <div className="mb-5 grid grid-cols-2 rounded-full border border-line p-1">
+            <div className="mb-5 grid grid-cols-2 rounded-full border border-line p-1" role="tablist" aria-label="Wallet tools">
               <button
                 className={`h-10 rounded-full text-xs font-bold uppercase tracking-[0.13em] transition ${
                   walletToolTab === "receive" ? "bg-[#ec4899] text-white" : "text-muted hover:text-text"
                 }`}
                 type="button"
+                id="wallet-tools-receive-tab"
+                role="tab"
+                aria-selected={walletToolTab === "receive"}
+                aria-controls="wallet-tools-receive-panel"
                 onClick={() => setWalletToolTab("receive")}
               >
                 Receive
@@ -2591,6 +2604,10 @@ function ProfilePage({
                   walletToolTab === "send" ? "bg-[#ec4899] text-white" : "text-muted hover:text-text"
                 }`}
                 type="button"
+                id="wallet-tools-send-tab"
+                role="tab"
+                aria-selected={walletToolTab === "send"}
+                aria-controls="wallet-tools-send-panel"
                 onClick={() => setWalletToolTab("send")}
               >
                 Send
@@ -2598,7 +2615,7 @@ function ProfilePage({
             </div>
 
             {walletToolTab === "receive" ? (
-              <div className="space-y-4 border border-line bg-surface p-4">
+              <div id="wallet-tools-receive-panel" className="space-y-4 border border-line bg-surface p-4" role="tabpanel" aria-labelledby="wallet-tools-receive-tab">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-[0.13em] text-mutedFaint">Receive</p>
                   <p className="mt-2 text-sm leading-6 text-muted">Use this address to receive supported tokens.</p>
@@ -2618,7 +2635,7 @@ function ProfilePage({
               </div>
             ) : (
 
-              <form className="space-y-4 border border-line bg-surface p-4" onSubmit={handleSendToken}>
+              <form id="wallet-tools-send-panel" className="space-y-4 border border-line bg-surface p-4" role="tabpanel" aria-labelledby="wallet-tools-send-tab" onSubmit={handleSendToken}>
                 <div>
                   <p className="text-xs font-bold uppercase tracking-[0.13em] text-mutedFaint">Send</p>
                   <p className="mt-2 text-sm leading-6 text-muted">Enter a recipient address and token amount.</p>
@@ -2955,7 +2972,7 @@ function Stat({ label, loading = false, value }) {
 
 function CampaignStats({ loading = false, stats }) {
   return (
-    <div className="ui-card flex flex-col overflow-hidden border border-line bg-surface min-[600px]:flex-row">
+    <div className="ui-card flex overflow-hidden border border-line bg-surface">
       <CampaignStat label="Open dares" value={stats.open} loading={loading} />
       <CampaignStat label="Coins in play" value={stats.coins} loading={loading} />
       <CampaignStat label="Active hunters" value={stats.hunters} loading={loading} />
@@ -2965,11 +2982,11 @@ function CampaignStats({ loading = false, stats }) {
 
 function CampaignStat({ label, loading = false, value }) {
   return (
-    <div className="min-w-0 border-b border-line px-5 py-4 text-center last:border-b-0 min-[600px]:flex-1 min-[600px]:border-b-0 min-[600px]:border-l min-[600px]:first:border-l-0 sm:px-6">
-      <p className="break-words font-mono text-3xl font-bold text-pink sm:text-4xl" aria-busy={loading}>
+    <div className="min-w-0 flex-1 border-l border-line px-2 py-3 text-center first:border-l-0 sm:px-6 sm:py-4">
+      <p className="break-words font-mono text-2xl font-bold text-pink sm:text-4xl" aria-busy={loading}>
         <AnimatedNumber value={loading ? 0 : value} />
       </p>
-      <p className="mt-2 text-xs font-bold uppercase tracking-[0.13em] text-muted">{label}</p>
+      <p className="mt-1 text-[10px] font-bold uppercase leading-4 tracking-[0.1em] text-muted sm:mt-2 sm:text-xs sm:tracking-[0.13em]">{label}</p>
     </div>
   );
 }
