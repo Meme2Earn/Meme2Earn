@@ -1253,7 +1253,7 @@ function App({ auth }) {
           </button>
 
           <div className="flex items-center gap-2 sm:gap-3">
-            <div className="hidden max-w-full overflow-x-auto border border-line bg-surface p-1 lg:flex">
+            <div className="ui-card hidden max-w-full overflow-x-auto border border-line bg-surface p-1 lg:flex">
               {PAGES.map((navPage) => (
                 <button
                   key={navPage}
@@ -1291,7 +1291,7 @@ function App({ auth }) {
             </button>
           </div>
           {mobileNavOpen ? (
-            <div id="mobile-navigation" className="grid w-full border border-line bg-surface p-1 lg:hidden">
+            <div id="mobile-navigation" className="ui-card grid w-full border border-line bg-surface p-1 lg:hidden">
               {PAGES.map((navPage) => (
                 <button
                   key={navPage}
@@ -1499,7 +1499,7 @@ function LandingPage({ bounties, bountiesLoading, stats, onCreate, onExplore }) 
         </div>
 
         <div className="space-y-6">
-          <div className="border-y border-line bg-white/72 py-6 backdrop-blur-sm">
+          <div className="py-6">
             <CampaignStats stats={stats} loading={bountiesLoading} />
           </div>
           <div className="grid gap-4 border-y border-line py-5 sm:grid-cols-2">
@@ -1754,7 +1754,7 @@ function M2ETVPage({ items, onCreate, onOpenBounty }) {
             Scroll through video submissions from meme bounty hunters across the platform.
           </p>
         </div>
-        <div className="grid grid-cols-1 min-[420px]:grid-cols-2">
+        <div className="ui-card grid grid-cols-1 overflow-hidden border border-line bg-surface min-[420px]:grid-cols-2">
           <Stat label="Videos" value={items.length} />
           <Stat label="Rewards shown" value={totalRewards ? formatReward(totalRewards) : 0} />
         </div>
@@ -1835,7 +1835,7 @@ function CreatePage({ bountySyncStatus, errors, form, onChange, onImageChange, o
         <p className="mt-5 max-w-xl text-base leading-7 text-muted">
           Post a clear task, set the reward, and choose how many hunters can join before the bounty fills.
         </p>
-        <div className="mt-8 grid grid-cols-1 border border-line bg-surface min-[420px]:grid-cols-2">
+        <div className="ui-card mt-8 grid grid-cols-1 overflow-hidden border border-line bg-surface min-[420px]:grid-cols-2">
           <Stat label="Required fields" value={3} />
           <Stat label="Default status" value="Open" />
         </div>
@@ -2204,6 +2204,7 @@ function ProfilePage({
   const [walletBalancesLoading, setWalletBalancesLoading] = useState(false);
   const [walletBalancesError, setWalletBalancesError] = useState("");
   const [walletBalanceRefresh, setWalletBalanceRefresh] = useState(0);
+  const [walletToolTab, setWalletToolTab] = useState("receive");
   const [walletSending, setWalletSending] = useState(false);
   const [walletTransaction, setWalletTransaction] = useState(null);
   const [transactionStates, setTransactionStates] = useState({});
@@ -2398,7 +2399,10 @@ function ProfilePage({
             <button
               className="inline-flex h-11 items-center justify-center gap-2 border border-line px-5 text-sm font-bold text-text transition hover:border-pink hover:text-pink"
               type="button"
-              onClick={() => setWalletOpen(true)}
+              onClick={() => {
+                setWalletToolTab("receive");
+                setWalletOpen(true);
+              }}
             >
               <Wallet size={16} />
               Wallet tools
@@ -2416,7 +2420,7 @@ function ProfilePage({
         </div>
       </div>
 
-      <div className="grid border border-line bg-surface min-[420px]:grid-cols-2 sm:grid-cols-4">
+      <div className="ui-card grid overflow-hidden border border-line bg-surface min-[420px]:grid-cols-2 sm:grid-cols-4">
         <Stat label="Joined" value={joinedBounties.length} />
         <Stat label="Posted" value={postedBounties.length} />
         <Stat label="Open dares" value={stats.open} />
@@ -2572,7 +2576,28 @@ function ProfilePage({
               ) : null}
             </div>
 
-            <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
+            <div className="mb-5 grid grid-cols-2 rounded-full border border-line p-1">
+              <button
+                className={`h-10 rounded-full text-xs font-bold uppercase tracking-[0.13em] transition ${
+                  walletToolTab === "receive" ? "bg-[#ec4899] text-white" : "text-muted hover:text-text"
+                }`}
+                type="button"
+                onClick={() => setWalletToolTab("receive")}
+              >
+                Receive
+              </button>
+              <button
+                className={`h-10 rounded-full text-xs font-bold uppercase tracking-[0.13em] transition ${
+                  walletToolTab === "send" ? "bg-[#ec4899] text-white" : "text-muted hover:text-text"
+                }`}
+                type="button"
+                onClick={() => setWalletToolTab("send")}
+              >
+                Send
+              </button>
+            </div>
+
+            {walletToolTab === "receive" ? (
               <div className="space-y-4 border border-line bg-surface p-4">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-[0.13em] text-mutedFaint">Receive</p>
@@ -2591,6 +2616,7 @@ function ProfilePage({
                   Copy address
                 </button>
               </div>
+            ) : (
 
               <form className="space-y-4 border border-line bg-surface p-4" onSubmit={handleSendToken}>
                 <div>
@@ -2668,7 +2694,7 @@ function ProfilePage({
                   {walletSending ? "Sending..." : "Send tokens"}
                 </button>
               </form>
-            </div>
+            )}
           </div>
         </div>
       ) : null}
@@ -2929,7 +2955,7 @@ function Stat({ label, loading = false, value }) {
 
 function CampaignStats({ loading = false, stats }) {
   return (
-    <div className="flex flex-col min-[600px]:flex-row">
+    <div className="ui-card flex flex-col overflow-hidden border border-line bg-surface min-[600px]:flex-row">
       <CampaignStat label="Open dares" value={stats.open} loading={loading} />
       <CampaignStat label="Coins in play" value={stats.coins} loading={loading} />
       <CampaignStat label="Active hunters" value={stats.hunters} loading={loading} />

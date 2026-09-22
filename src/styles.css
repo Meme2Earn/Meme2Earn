@@ -8,6 +8,9 @@
   color: #1e151a;
   background: #fff;
   font-family: "Space Grotesk", sans-serif;
+  --radius-pill: 999px;
+  --radius-control: 18px;
+  --radius-card: 22px;
 }
 
 * {
@@ -33,6 +36,40 @@ input,
 textarea,
 select {
   font: inherit;
+}
+
+@layer components {
+  .ui-pill {
+    border-radius: var(--radius-pill);
+  }
+
+  .ui-control {
+    border-radius: var(--radius-control);
+  }
+
+  .ui-card {
+    border-radius: var(--radius-card);
+  }
+}
+
+button {
+  border-radius: var(--radius-pill);
+}
+
+input:not([type="checkbox"]):not([type="radio"]),
+textarea,
+select {
+  border-radius: var(--radius-control);
+}
+
+label.inline-flex {
+  border-radius: var(--radius-pill);
+}
+
+.border.bg-surface:not(input):not(textarea):not(select),
+.border.bg-ink:not(input):not(textarea):not(select),
+.border.bg-raised:not(input):not(textarea):not(select) {
+  border-radius: var(--radius-card);
 }
 
 button:focus-visible,
