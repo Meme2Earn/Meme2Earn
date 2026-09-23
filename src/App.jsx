@@ -2308,6 +2308,8 @@ function ProfilePage({
   const [walletOpen, setWalletOpen] = useState(false);
   const [walletStatus, setWalletStatus] = useState("");
   const [walletError, setWalletError] = useState("");
+  const [addressCopied, setAddressCopied] = useState(false);
+  const addressCopyTimer = useRef(null);
   const [walletBalances, setWalletBalances] = useState({});
   const [walletBalancesLoading, setWalletBalancesLoading] = useState(false);
   const [walletBalancesError, setWalletBalancesError] = useState("");
@@ -2318,6 +2320,10 @@ function ProfilePage({
   const [transactionStates, setTransactionStates] = useState({});
   const [transactionRefresh, setTransactionRefresh] = useState(0);
   const [transactionsLoading, setTransactionsLoading] = useState(false);
+
+  useEffect(() => () => {
+    if (addressCopyTimer.current) window.clearTimeout(addressCopyTimer.current);
+  }, []);
   const selectedTokenBalance = walletBalances[sendForm.token] || "0.00";
   const selectedTokenBalanceLabel =
     selectedTokenBalance === "Unavailable" ? "Unavailable" : `${selectedTokenBalance} ${sendForm.token}`;
@@ -2402,9 +2408,13 @@ function ProfilePage({
     if (!walletAddress) return;
     try {
       await navigator.clipboard.writeText(walletAddress);
-      setWalletStatus("Wallet address copied.");
+      setAddressCopied(true);
+      if (addressCopyTimer.current) window.clearTimeout(addressCopyTimer.current);
+      addressCopyTimer.current = window.setTimeout(() => setAddressCopied(false), 2000);
+      setWalletStatus("");
       setWalletError("");
     } catch {
+      setAddressCopied(false);
       setWalletError("Could not copy address. Select and copy it manually.");
       setWalletStatus("");
     }
@@ -2737,13 +2747,16 @@ function ProfilePage({
                   {walletAddress || "Wallet pending"}
                 </div>
                 <button
-                  className="inline-flex h-11 w-full items-center justify-center gap-2 border border-line text-sm font-bold text-text transition hover:border-pink hover:text-pink disabled:cursor-not-allowed disabled:text-mutedFaint"
+                  className={`inline-flex h-11 w-full items-center justify-center gap-2 border text-sm font-bold transition disabled:cursor-not-allowed disabled:text-mutedFaint ${
+                    addressCopied ? "border-lime text-lime" : "border-line text-text hover:border-pink hover:text-pink"
+                  }`}
                   type="button"
                   onClick={handleCopyAddress}
                   disabled={!walletAddress}
+                  aria-live="polite"
                 >
-                  <Copy size={16} />
-                  Copy address
+                  {addressCopied ? <Check size={16} /> : <Copy size={16} />}
+                  {addressCopied ? "Copied" : "Copy address"}
                 </button>
               </div>
             ) : (
