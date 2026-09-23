@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
+  CalendarDays,
   CircleAlert,
   ChevronsUpDown,
   ChevronRight,
@@ -1976,12 +1977,15 @@ function CreatePage({ bountySyncStatus, errors, form, onChange, onImageChange, o
             </select>
           </Field>
           <Field label="Deadline">
-            <input
-              className="date-pill form-pill-value h-11 w-full rounded-full border border-[#F4B6D7] bg-white px-4 text-left font-mono text-sm text-text"
-              type="date"
-              value={form.deadline}
-              onChange={(event) => onChange({ ...form, deadline: event.target.value })}
-            />
+            <div className="relative">
+              <input
+                className="date-pill form-pill-value h-11 w-full rounded-full border border-[#F4B6D7] bg-white px-4 pr-11 text-left font-mono text-sm text-text"
+                type="date"
+                value={form.deadline}
+                onChange={(event) => onChange({ ...form, deadline: event.target.value })}
+              />
+              <CalendarDays className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-muted" size={16} aria-hidden="true" />
+            </div>
           </Field>
         </div>
 

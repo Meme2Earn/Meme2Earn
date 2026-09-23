@@ -78,6 +78,10 @@ select {
   text-align: left;
 }
 
+.date-pill::-webkit-calendar-picker-indicator {
+  opacity: 0;
+}
+
 label.inline-flex {
   border-radius: var(--radius-pill);
 }
