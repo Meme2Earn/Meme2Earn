@@ -17,7 +17,7 @@ const escrowFinalizerPrivateKey =
   Deno.env.get("DARE_ESCROW_FINALIZER_PRIVATE_KEY") || Deno.env.get("ESCROW_FINALIZER_PRIVATE_KEY") || "";
 const communityFinalizerCronSecret = Deno.env.get("COMMUNITY_FINALIZER_CRON_SECRET") || "";
 const minimumDareRewards: Record<string, number> = {
-  USDG: 100,
+  USDG: 10,
   PONS: 167,
   CASHCAT: 619,
   ARTIFICIAL_INU: 406,
@@ -186,7 +186,7 @@ function encodeFilter(value: unknown) {
   return encodeURIComponent(String(value || ""));
 }
 
-async function createBounty(bounty: BountyInput) {
+function validateBounty(bounty: BountyInput) {
   const row = bountyToRow(bounty);
   if (!row.title) throw new Error("Title is required.");
   if (!row.poster) throw new Error("Wallet address is required.");
@@ -194,6 +194,11 @@ async function createBounty(bounty: BountyInput) {
   if (!Number.isFinite(row.reward) || row.reward < minimumReward) {
     throw new Error(`Minimum bounty amount is ${minimumReward} ${row.coin}.`);
   }
+  return row;
+}
+
+async function createBounty(bounty: BountyInput) {
+  const row = validateBounty(bounty);
 
   const response = await supabaseFetch("/rest/v1/bounties", {
     method: "POST",
@@ -450,6 +455,11 @@ Deno.serve(async (request) => {
     if (action === "create_bounty") {
       const bounty = await createBounty(body.bounty);
       return jsonResponse({ bounty, privyUserId });
+    }
+
+    if (action === "validate_bounty") {
+      validateBounty(body.bounty);
+      return jsonResponse({ valid: true, privyUserId });
     }
 
     if (action === "join_bounty") {

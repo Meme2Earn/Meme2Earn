@@ -43,10 +43,12 @@ import {
   selectCreatorWinnerRecord,
   uploadBountyImage,
   uploadSubmissionVideo,
+  validateBountyRecord,
   voteSubmissionRecord,
 } from "./supabaseStorage.js";
 import {
   calculateCreatorFee,
+  cancelAndRefundEscrow,
   createBountyEscrow,
   DARE_ESCROW_ADDRESS,
   finalizeBountyEscrow,
@@ -54,6 +56,7 @@ import {
   getTokenBalance,
   getTransactionExplorerUrl,
   getTransactionStatus,
+  inspectEscrowTransaction,
   transferToken,
 } from "./escrowClient.js";
 
@@ -313,6 +316,12 @@ function getTokenAddress(token) {
   return TOKEN_CONTRACTS[token] || "";
 }
 
+function getTokenByAddress(address) {
+  if (!address) return "TOKEN";
+  const match = Object.entries(TOKEN_CONTRACTS).find(([, contract]) => contract.toLowerCase() === address.toLowerCase());
+  return match?.[0] || "TOKEN";
+}
+
 function getTokenLogoUrl(token) {
   return TOKEN_METADATA[token]?.logo || "";
 }
@@ -426,6 +435,7 @@ function App({ auth }) {
   const [form, setForm] = useState(blankForm);
   const [errors, setErrors] = useState({});
   const [bountySyncStatus, setBountySyncStatus] = useState("");
+  const [bountySubmitting, setBountySubmitting] = useState(false);
   const [marketStatus, setMarketStatus] = useState("");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [profile, setProfile] = useState(blankProfile);
@@ -1179,7 +1189,12 @@ function App({ auth }) {
       tokenAddress: getTokenAddress(form.coin),
     };
 
+    let escrowedBounty = null;
+    setBountySubmitting(true);
     try {
+      setBountySyncStatus("Validating campaign...");
+      await validateBountyRecord({ bounty: nextBounty, getAccessToken });
+
       if (form.imageFile) {
         setBountySyncStatus("Uploading campaign image...");
         const uploadedImage = await uploadBountyImage({
@@ -1203,17 +1218,33 @@ function App({ auth }) {
         ...nextBounty,
         ...escrowResult,
       };
+      escrowedBounty = bountyWithEscrow;
+      try {
+        window.localStorage.setItem("m2e-pending-escrow", JSON.stringify(bountyWithEscrow));
+      } catch {
+        // Recovery still remains available by entering the on-chain transaction hash.
+      }
 
       setBountySyncStatus(isSupabaseConfigured ? "Saving dare campaign..." : "Saving campaign locally.");
       const result = await createBountyRecord({ bounty: bountyWithEscrow, getAccessToken });
       const savedBounty = result.bounty;
+      try {
+        window.localStorage.removeItem("m2e-pending-escrow");
+      } catch {
+        // A stale recovery draft is harmless and can be inspected before any action.
+      }
       setBounties((current) => [savedBounty, ...current]);
       setSelectedBountyId(savedBounty.id);
       setBountySyncStatus(result.stored ? "" : "Campaign saved locally. Configure Supabase to persist it.");
     } catch (error) {
-      setErrors({ form: error.message || "Could not save campaign." });
+      const message = escrowedBounty?.escrowTxHash
+        ? `Funds are in escrow, but the campaign could not be saved. Do not submit again. Recover it from Profile using transaction ${escrowedBounty.escrowTxHash}.`
+        : error.message || "Could not save campaign.";
+      setErrors({ form: message });
       setBountySyncStatus("");
       return;
+    } finally {
+      setBountySubmitting(false);
     }
 
     setActiveTab("Open");
@@ -1414,6 +1445,7 @@ function App({ auth }) {
         {page === "Create" && (
           <CreatePage
             bountySyncStatus={bountySyncStatus}
+            submitting={bountySubmitting}
             errors={errors}
             form={form}
             onChange={setForm}
@@ -1859,7 +1891,7 @@ function M2ETVPage({ items, onCreate, onOpenBounty }) {
   );
 }
 
-function CreatePage({ bountySyncStatus, errors, form, onChange, onImageChange, onSubmit }) {
+function CreatePage({ bountySyncStatus, errors, form, onChange, onImageChange, onSubmit, submitting }) {
   const creatorFee = form.fundingType === "Self-Funded Dare" ? calculateCreatorFee(form.reward) : 0;
   const totalLaunchAmount = (Number(form.reward) || 0) + creatorFee;
   const minimumReward = getMinimumDareReward(form.coin);
@@ -1879,12 +1911,6 @@ function CreatePage({ bountySyncStatus, errors, form, onChange, onImageChange, o
       </div>
 
       <form className="space-y-5" onSubmit={onSubmit}>
-        {bountySyncStatus ? (
-          <div className="border border-line bg-surface px-4 py-3 text-sm font-bold text-muted">
-            {bountySyncStatus}
-          </div>
-        ) : null}
-
         {errors.form ? (
           <div className="border border-pink/50 bg-pink/10 px-4 py-3 text-sm font-bold text-pink">
             {errors.form}
@@ -2089,8 +2115,14 @@ function CreatePage({ bountySyncStatus, errors, form, onChange, onImageChange, o
           </div>
         </div>
 
-        <button className="h-12 w-full bg-pink text-sm font-bold text-ink transition hover:bg-text" type="submit">
-          Submit bounty
+        <button
+          className="inline-flex h-12 w-full items-center justify-center gap-2 bg-pink px-5 text-sm font-bold text-ink transition hover:bg-text disabled:cursor-wait disabled:bg-pink/70"
+          type="submit"
+          disabled={submitting}
+          aria-live="polite"
+        >
+          {submitting ? <LoaderCircle className="animate-spin" size={18} /> : <Send size={17} />}
+          <span>{submitting ? bountySyncStatus || "Creating bounty..." : "Submit bounty"}</span>
         </button>
       </form>
     </section>
@@ -2320,6 +2352,17 @@ function ProfilePage({
   const [transactionStates, setTransactionStates] = useState({});
   const [transactionRefresh, setTransactionRefresh] = useState(0);
   const [transactionsLoading, setTransactionsLoading] = useState(false);
+  const [recoveryHash, setRecoveryHash] = useState(() => {
+    try {
+      return JSON.parse(window.localStorage.getItem("m2e-pending-escrow") || "null")?.escrowTxHash || "";
+    } catch {
+      return "";
+    }
+  });
+  const [recoveryEscrow, setRecoveryEscrow] = useState(null);
+  const [recoveryLoading, setRecoveryLoading] = useState(false);
+  const [recoveryStatus, setRecoveryStatus] = useState("");
+  const [recoveryError, setRecoveryError] = useState("");
 
   useEffect(() => () => {
     if (addressCopyTimer.current) window.clearTimeout(addressCopyTimer.current);
@@ -2473,6 +2516,73 @@ function ProfilePage({
       setWalletStatus("");
     } finally {
       setWalletSending(false);
+    }
+  }
+
+  async function handleInspectEscrow(event) {
+    event.preventDefault();
+    setRecoveryLoading(true);
+    setRecoveryError("");
+    setRecoveryStatus("Checking escrow transaction...");
+    setRecoveryEscrow(null);
+    try {
+      const result = await inspectEscrowTransaction({
+        transactionHash: recoveryHash.trim(),
+        walletAddress,
+      });
+      setRecoveryEscrow(result);
+      setRecoveryStatus("");
+    } catch (error) {
+      setRecoveryError(error?.message || "Could not inspect this escrow transaction.");
+      setRecoveryStatus("");
+    } finally {
+      setRecoveryLoading(false);
+    }
+  }
+
+  async function handleRecoverEscrow() {
+    if (!recoveryEscrow || !wallet) return;
+    setRecoveryLoading(true);
+    setRecoveryError("");
+    setRecoveryStatus(
+      recoveryEscrow.status === 4
+        ? "Confirm the refund claim in your wallet..."
+        : "Confirm escrow cancellation, then confirm the refund claim...",
+    );
+    try {
+      const result = await cancelAndRefundEscrow({
+        escrowBountyId: recoveryEscrow.escrowBountyId,
+        wallet,
+      });
+      const refreshed = await inspectEscrowTransaction({
+        transactionHash: recoveryEscrow.transactionHash,
+        walletAddress,
+      });
+      setRecoveryEscrow(refreshed);
+      setRecoveryStatus(
+        `Refund confirmed${result.refundTxHash ? `: ${truncateAddress(result.refundTxHash)}` : ""}.`,
+      );
+      try {
+        window.localStorage.removeItem("m2e-pending-escrow");
+      } catch {
+        // The confirmed on-chain refund does not depend on browser storage cleanup.
+      }
+      setWalletBalanceRefresh((current) => current + 1);
+      setTransactionRefresh((current) => current + 1);
+    } catch (error) {
+      setRecoveryError(error?.message || "Could not recover this escrow.");
+      setRecoveryStatus("");
+      try {
+        const refreshed = await inspectEscrowTransaction({
+          transactionHash: recoveryEscrow.transactionHash,
+          walletAddress,
+        });
+        setRecoveryEscrow(refreshed);
+      } catch {
+        // Keep the last verified escrow details visible.
+      }
+    } finally {
+      setRecoveryLoading(false);
     }
   }
 
@@ -2641,6 +2751,83 @@ function ProfilePage({
             Escrow and payout transactions will appear here after you create a funded dare or win one.
           </div>
         )}
+
+        <div className="mt-8 border-t border-line pt-6">
+          <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,0.8fr)] lg:items-start">
+            <div>
+              <p className="inline-flex items-center gap-2 text-sm font-bold uppercase tracking-[0.16em] text-muted">
+                <CircleAlert size={16} className="text-pink" />
+                Missing campaign recovery
+              </p>
+              <h3 className="mt-3 font-display text-2xl font-bold text-text">Recover an escrowed reward.</h3>
+              <p className="mt-2 max-w-xl text-sm leading-6 text-muted">
+                Use the escrow creation transaction when funding succeeded but the campaign did not appear. Only the creator wallet can cancel and claim its contribution.
+              </p>
+            </div>
+            <form className="space-y-3" onSubmit={handleInspectEscrow}>
+              <label className="block text-xs font-bold uppercase tracking-[0.13em] text-mutedFaint" htmlFor="recovery-transaction">
+                Escrow transaction hash
+              </label>
+              <input
+                id="recovery-transaction"
+                className="h-11 w-full border border-line bg-ink px-4 font-mono text-xs text-text placeholder:text-mutedFaint"
+                placeholder="0x..."
+                value={recoveryHash}
+                onChange={(event) => {
+                  setRecoveryHash(event.target.value);
+                  setRecoveryEscrow(null);
+                  setRecoveryError("");
+                  setRecoveryStatus("");
+                }}
+              />
+              <button
+                className="inline-flex h-11 w-full items-center justify-center gap-2 border border-line px-4 text-sm font-bold text-text transition hover:border-pink hover:text-pink disabled:cursor-wait disabled:text-muted"
+                type="submit"
+                disabled={recoveryLoading || !recoveryHash.trim() || !walletAddress}
+              >
+                {recoveryLoading && !recoveryEscrow ? <LoaderCircle className="animate-spin" size={16} /> : <Search size={16} />}
+                Check escrow
+              </button>
+            </form>
+          </div>
+
+          {recoveryError ? (
+            <p className="mt-4 flex items-start gap-2 text-sm font-bold leading-6 text-pink">
+              <CircleAlert className="mt-0.5 shrink-0" size={16} />
+              {recoveryError}
+            </p>
+          ) : null}
+          {recoveryStatus ? <p className="mt-4 text-sm font-bold text-muted">{recoveryStatus}</p> : null}
+
+          {recoveryEscrow ? (
+            <div className="mt-5 grid gap-4 border border-line bg-surface p-4 sm:grid-cols-[1fr_auto] sm:items-center">
+              <div className="min-w-0">
+                <p className="text-xs font-bold uppercase tracking-[0.13em] text-mutedFaint">
+                  {recoveryEscrow.statusLabel} escrow
+                </p>
+                <p className="mt-2 font-mono text-2xl font-bold text-gold">
+                  {formatTokenBalance(recoveryEscrow.refundAmount)} ${getTokenByAddress(recoveryEscrow.tokenAddress)}
+                </p>
+                <p className="mt-2 text-sm text-muted">
+                  Deadline {new Date(recoveryEscrow.deadline).toLocaleString()}
+                </p>
+              </div>
+              {recoveryEscrow.canRecover ? (
+                <button
+                  className="inline-flex h-11 items-center justify-center gap-2 bg-pink px-5 text-sm font-bold text-ink transition hover:bg-text disabled:cursor-wait disabled:bg-pink/70"
+                  type="button"
+                  onClick={handleRecoverEscrow}
+                  disabled={recoveryLoading || !wallet}
+                >
+                  {recoveryLoading ? <LoaderCircle className="animate-spin" size={16} /> : <RefreshCw size={16} />}
+                  {recoveryEscrow.status === 4 ? "Claim refund" : "Cancel and refund"}
+                </button>
+              ) : (
+                <span className="text-sm font-bold text-muted">No refund remains to claim.</span>
+              )}
+            </div>
+          ) : null}
+        </div>
       </section>
 
       {walletOpen ? (

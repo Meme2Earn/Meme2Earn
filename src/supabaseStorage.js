@@ -280,6 +280,15 @@ export async function createBountyRecord({ bounty, getAccessToken }) {
   return { stored: true, bounty: bountyFromRow(row) };
 }
 
+export async function validateBountyRecord({ bounty, getAccessToken }) {
+  const secureResult = await callMarketplaceFunction({
+    action: "validate_bounty",
+    getAccessToken,
+    payload: { bounty },
+  });
+  return { validated: Boolean(secureResult?.valid) };
+}
+
 export async function fetchBountyJoins(walletAddress) {
   if (!isSupabaseConfigured || !walletAddress) return { stored: false, joins: [] };
 
