@@ -48,7 +48,6 @@ import {
 } from "./supabaseStorage.js";
 import {
   calculateCreatorFee,
-  cancelAndRefundEscrow,
   createBountyEscrow,
   DARE_ESCROW_ADDRESS,
   finalizeBountyEscrow,
@@ -56,7 +55,6 @@ import {
   getTokenBalance,
   getTransactionExplorerUrl,
   getTransactionStatus,
-  inspectEscrowTransaction,
   transferToken,
 } from "./escrowClient.js";
 
@@ -314,12 +312,6 @@ function truncateAddress(address) {
 
 function getTokenAddress(token) {
   return TOKEN_CONTRACTS[token] || "";
-}
-
-function getTokenByAddress(address) {
-  if (!address) return "TOKEN";
-  const match = Object.entries(TOKEN_CONTRACTS).find(([, contract]) => contract.toLowerCase() === address.toLowerCase());
-  return match?.[0] || "TOKEN";
 }
 
 function getTokenLogoUrl(token) {
@@ -1219,26 +1211,16 @@ function App({ auth }) {
         ...escrowResult,
       };
       escrowedBounty = bountyWithEscrow;
-      try {
-        window.localStorage.setItem("m2e-pending-escrow", JSON.stringify(bountyWithEscrow));
-      } catch {
-        // Recovery still remains available by entering the on-chain transaction hash.
-      }
 
       setBountySyncStatus(isSupabaseConfigured ? "Saving dare campaign..." : "Saving campaign locally.");
       const result = await createBountyRecord({ bounty: bountyWithEscrow, getAccessToken });
       const savedBounty = result.bounty;
-      try {
-        window.localStorage.removeItem("m2e-pending-escrow");
-      } catch {
-        // A stale recovery draft is harmless and can be inspected before any action.
-      }
       setBounties((current) => [savedBounty, ...current]);
       setSelectedBountyId(savedBounty.id);
       setBountySyncStatus(result.stored ? "" : "Campaign saved locally. Configure Supabase to persist it.");
     } catch (error) {
       const message = escrowedBounty?.escrowTxHash
-        ? `Funds are in escrow, but the campaign could not be saved. Do not submit again. Recover it from Profile using transaction ${escrowedBounty.escrowTxHash}.`
+        ? `Funds are in escrow, but the campaign could not be saved. Do not submit again. Transaction: ${escrowedBounty.escrowTxHash}.`
         : error.message || "Could not save campaign.";
       setErrors({ form: message });
       setBountySyncStatus("");
@@ -2340,36 +2322,63 @@ function ProfilePage({
   const [walletOpen, setWalletOpen] = useState(false);
   const [walletStatus, setWalletStatus] = useState("");
   const [walletError, setWalletError] = useState("");
+  const [copyError, setCopyError] = useState("");
   const [addressCopied, setAddressCopied] = useState(false);
   const addressCopyTimer = useRef(null);
   const [walletBalances, setWalletBalances] = useState({});
   const [walletBalancesLoading, setWalletBalancesLoading] = useState(false);
   const [walletBalancesError, setWalletBalancesError] = useState("");
   const [walletBalanceRefresh, setWalletBalanceRefresh] = useState(0);
-  const [walletToolTab, setWalletToolTab] = useState("receive");
+  const [walletToolTab, setWalletToolTab] = useState("send");
   const [walletSending, setWalletSending] = useState(false);
   const [walletTransaction, setWalletTransaction] = useState(null);
+  const [sendTouched, setSendTouched] = useState({ recipient: false, amount: false });
   const [transactionStates, setTransactionStates] = useState({});
   const [transactionRefresh, setTransactionRefresh] = useState(0);
   const [transactionsLoading, setTransactionsLoading] = useState(false);
-  const [recoveryHash, setRecoveryHash] = useState(() => {
-    try {
-      return JSON.parse(window.localStorage.getItem("m2e-pending-escrow") || "null")?.escrowTxHash || "";
-    } catch {
-      return "";
-    }
-  });
-  const [recoveryEscrow, setRecoveryEscrow] = useState(null);
-  const [recoveryLoading, setRecoveryLoading] = useState(false);
-  const [recoveryStatus, setRecoveryStatus] = useState("");
-  const [recoveryError, setRecoveryError] = useState("");
 
   useEffect(() => () => {
     if (addressCopyTimer.current) window.clearTimeout(addressCopyTimer.current);
   }, []);
-  const selectedTokenBalance = walletBalances[sendForm.token] || "0.00";
-  const selectedTokenBalanceLabel =
-    selectedTokenBalance === "Unavailable" ? "Unavailable" : `${selectedTokenBalance} ${sendForm.token}`;
+  const selectedTokenBalance = walletBalances[sendForm.token] ?? "0";
+  const selectedTokenBalanceNumber = Number(selectedTokenBalance);
+  const selectedBalanceReady =
+    !walletBalancesLoading &&
+    Object.prototype.hasOwnProperty.call(walletBalances, sendForm.token) &&
+    selectedTokenBalance !== "Unavailable" &&
+    Number.isFinite(selectedTokenBalanceNumber);
+  const recipient = sendForm.recipient.trim();
+  const sendAmount = Number(sendForm.amount);
+  const recipientValid = /^0x[a-fA-F0-9]{40}$/.test(recipient);
+  const amountValid = sendForm.amount.trim() !== "" && Number.isFinite(sendAmount) && sendAmount > 0;
+  const insufficientBalance = amountValid && selectedBalanceReady && sendAmount > selectedTokenBalanceNumber;
+  const sendFormValid =
+    connected && wallet && recipientValid && amountValid && selectedBalanceReady && !insufficientBalance;
+  const recipientError =
+    sendTouched.recipient && !recipientValid
+      ? recipient
+        ? "That doesn't look like a valid address. It should start with 0x and be 42 characters."
+        : "Enter a recipient wallet address."
+      : "";
+  const amountError =
+    sendTouched.amount && sendForm.amount.trim() !== "" && !amountValid
+      ? "Enter an amount greater than 0."
+      : insufficientBalance
+        ? `You only have ${formatTokenBalance(selectedTokenBalance)} ${sendForm.token}.`
+        : "";
+  const sendButtonLabel = walletSending
+    ? "Sending..."
+    : !recipientValid
+      ? "Enter recipient"
+      : !amountValid
+        ? "Enter amount"
+        : !selectedBalanceReady
+          ? walletBalancesLoading
+            ? "Loading balance..."
+            : "Balance unavailable"
+          : insufficientBalance
+            ? "Insufficient balance"
+            : `Send ${sendForm.amount} ${sendForm.token}`;
 
   useEffect(() => {
     if (!expandedBountyId && postedBounties[0]?.id) {
@@ -2390,7 +2399,7 @@ function ProfilePage({
         TOKEN_OPTIONS.map(async (token) => {
           const tokenAddress = getTokenAddress(token);
           const balance = await getTokenBalance({ tokenAddress, walletAddress });
-          return [token, formatTokenBalance(balance.formatted)];
+          return [token, balance.formatted];
         }),
       );
 
@@ -2452,21 +2461,42 @@ function ProfilePage({
     try {
       await navigator.clipboard.writeText(walletAddress);
       setAddressCopied(true);
+      setCopyError("");
       if (addressCopyTimer.current) window.clearTimeout(addressCopyTimer.current);
       addressCopyTimer.current = window.setTimeout(() => setAddressCopied(false), 2000);
-      setWalletStatus("");
-      setWalletError("");
     } catch {
       setAddressCopied(false);
-      setWalletError("Could not copy address. Select and copy it manually.");
-      setWalletStatus("");
+      setCopyError("Could not copy the address. Select and copy it manually.");
     }
+  }
+
+  async function handlePasteRecipient() {
+    try {
+      const pastedRecipient = (await navigator.clipboard.readText()).trim();
+      setSendForm((current) => ({ ...current, recipient: pastedRecipient }));
+      setSendTouched((current) => ({ ...current, recipient: true }));
+      setWalletError("");
+      setWalletStatus("");
+      setWalletTransaction(null);
+    } catch {
+      setWalletError("Could not read your clipboard. Paste the address manually.");
+    }
+  }
+
+  function handleMaxAmount() {
+    if (!selectedBalanceReady) return;
+    setSendForm((current) => ({ ...current, amount: selectedTokenBalance }));
+    setSendTouched((current) => ({ ...current, amount: true }));
+    setWalletError("");
+    setWalletStatus("");
+    setWalletTransaction(null);
   }
 
   async function handleSendToken(event) {
     event.preventDefault();
     const amount = Number(sendForm.amount);
     const recipient = sendForm.recipient.trim();
+    setSendTouched({ recipient: true, amount: true });
 
     if (!connected) {
       setWalletError("Login to send tokens.");
@@ -2482,6 +2512,16 @@ function ProfilePage({
 
     if (!amount || amount <= 0) {
       setWalletError("Enter an amount greater than 0.");
+      setWalletStatus("");
+      return;
+    }
+
+    if (!selectedBalanceReady || amount > selectedTokenBalanceNumber) {
+      setWalletError(
+        selectedBalanceReady
+          ? `Insufficient ${sendForm.token} balance.`
+          : `Your ${sendForm.token} balance is not available yet.`,
+      );
       setWalletStatus("");
       return;
     }
@@ -2509,6 +2549,7 @@ function ProfilePage({
       setWalletStatus(`Sent ${transferSummary}.`);
       setWalletTransaction(result);
       setSendForm((current) => ({ ...current, recipient: "", amount: "" }));
+      setSendTouched({ recipient: false, amount: false });
       setWalletBalanceRefresh((current) => current + 1);
     } catch (error) {
       const rejected = error?.code === 4001 || error?.code === "ACTION_REJECTED";
@@ -2516,73 +2557,6 @@ function ProfilePage({
       setWalletStatus("");
     } finally {
       setWalletSending(false);
-    }
-  }
-
-  async function handleInspectEscrow(event) {
-    event.preventDefault();
-    setRecoveryLoading(true);
-    setRecoveryError("");
-    setRecoveryStatus("Checking escrow transaction...");
-    setRecoveryEscrow(null);
-    try {
-      const result = await inspectEscrowTransaction({
-        transactionHash: recoveryHash.trim(),
-        walletAddress,
-      });
-      setRecoveryEscrow(result);
-      setRecoveryStatus("");
-    } catch (error) {
-      setRecoveryError(error?.message || "Could not inspect this escrow transaction.");
-      setRecoveryStatus("");
-    } finally {
-      setRecoveryLoading(false);
-    }
-  }
-
-  async function handleRecoverEscrow() {
-    if (!recoveryEscrow || !wallet) return;
-    setRecoveryLoading(true);
-    setRecoveryError("");
-    setRecoveryStatus(
-      recoveryEscrow.status === 4
-        ? "Confirm the refund claim in your wallet..."
-        : "Confirm escrow cancellation, then confirm the refund claim...",
-    );
-    try {
-      const result = await cancelAndRefundEscrow({
-        escrowBountyId: recoveryEscrow.escrowBountyId,
-        wallet,
-      });
-      const refreshed = await inspectEscrowTransaction({
-        transactionHash: recoveryEscrow.transactionHash,
-        walletAddress,
-      });
-      setRecoveryEscrow(refreshed);
-      setRecoveryStatus(
-        `Refund confirmed${result.refundTxHash ? `: ${truncateAddress(result.refundTxHash)}` : ""}.`,
-      );
-      try {
-        window.localStorage.removeItem("m2e-pending-escrow");
-      } catch {
-        // The confirmed on-chain refund does not depend on browser storage cleanup.
-      }
-      setWalletBalanceRefresh((current) => current + 1);
-      setTransactionRefresh((current) => current + 1);
-    } catch (error) {
-      setRecoveryError(error?.message || "Could not recover this escrow.");
-      setRecoveryStatus("");
-      try {
-        const refreshed = await inspectEscrowTransaction({
-          transactionHash: recoveryEscrow.transactionHash,
-          walletAddress,
-        });
-        setRecoveryEscrow(refreshed);
-      } catch {
-        // Keep the last verified escrow details visible.
-      }
-    } finally {
-      setRecoveryLoading(false);
     }
   }
 
@@ -2624,7 +2598,7 @@ function ProfilePage({
                   className="inline-flex h-10 items-center justify-center gap-2 border border-line px-3 text-xs font-bold text-text transition hover:border-pink hover:text-pink sm:h-11 sm:px-5 sm:text-sm"
                   type="button"
                   onClick={() => {
-                    setWalletToolTab("receive");
+                    setWalletToolTab("send");
                     setWalletOpen(true);
                   }}
                 >
@@ -2752,165 +2726,35 @@ function ProfilePage({
           </div>
         )}
 
-        <div className="mt-8 border-t border-line pt-6">
-          <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,0.8fr)] lg:items-start">
-            <div>
-              <p className="inline-flex items-center gap-2 text-sm font-bold uppercase tracking-[0.16em] text-muted">
-                <CircleAlert size={16} className="text-pink" />
-                Missing campaign recovery
-              </p>
-              <h3 className="mt-3 font-display text-2xl font-bold text-text">Recover an escrowed reward.</h3>
-              <p className="mt-2 max-w-xl text-sm leading-6 text-muted">
-                Use the escrow creation transaction when funding succeeded but the campaign did not appear. Only the creator wallet can cancel and claim its contribution.
-              </p>
-            </div>
-            <form className="space-y-3" onSubmit={handleInspectEscrow}>
-              <label className="block text-xs font-bold uppercase tracking-[0.13em] text-mutedFaint" htmlFor="recovery-transaction">
-                Escrow transaction hash
-              </label>
-              <input
-                id="recovery-transaction"
-                className="h-11 w-full border border-line bg-ink px-4 font-mono text-xs text-text placeholder:text-mutedFaint"
-                placeholder="0x..."
-                value={recoveryHash}
-                onChange={(event) => {
-                  setRecoveryHash(event.target.value);
-                  setRecoveryEscrow(null);
-                  setRecoveryError("");
-                  setRecoveryStatus("");
-                }}
-              />
-              <button
-                className="inline-flex h-11 w-full items-center justify-center gap-2 border border-line px-4 text-sm font-bold text-text transition hover:border-pink hover:text-pink disabled:cursor-wait disabled:text-muted"
-                type="submit"
-                disabled={recoveryLoading || !recoveryHash.trim() || !walletAddress}
-              >
-                {recoveryLoading && !recoveryEscrow ? <LoaderCircle className="animate-spin" size={16} /> : <Search size={16} />}
-                Check escrow
-              </button>
-            </form>
-          </div>
-
-          {recoveryError ? (
-            <p className="mt-4 flex items-start gap-2 text-sm font-bold leading-6 text-pink">
-              <CircleAlert className="mt-0.5 shrink-0" size={16} />
-              {recoveryError}
-            </p>
-          ) : null}
-          {recoveryStatus ? <p className="mt-4 text-sm font-bold text-muted">{recoveryStatus}</p> : null}
-
-          {recoveryEscrow ? (
-            <div className="mt-5 grid gap-4 border border-line bg-surface p-4 sm:grid-cols-[1fr_auto] sm:items-center">
-              <div className="min-w-0">
-                <p className="text-xs font-bold uppercase tracking-[0.13em] text-mutedFaint">
-                  {recoveryEscrow.statusLabel} escrow
-                </p>
-                <p className="mt-2 font-mono text-2xl font-bold text-gold">
-                  {formatTokenBalance(recoveryEscrow.refundAmount)} ${getTokenByAddress(recoveryEscrow.tokenAddress)}
-                </p>
-                <p className="mt-2 text-sm text-muted">
-                  Deadline {new Date(recoveryEscrow.deadline).toLocaleString()}
-                </p>
-              </div>
-              {recoveryEscrow.canRecover ? (
-                <button
-                  className="inline-flex h-11 items-center justify-center gap-2 bg-pink px-5 text-sm font-bold text-ink transition hover:bg-text disabled:cursor-wait disabled:bg-pink/70"
-                  type="button"
-                  onClick={handleRecoverEscrow}
-                  disabled={recoveryLoading || !wallet}
-                >
-                  {recoveryLoading ? <LoaderCircle className="animate-spin" size={16} /> : <RefreshCw size={16} />}
-                  {recoveryEscrow.status === 4 ? "Claim refund" : "Cancel and refund"}
-                </button>
-              ) : (
-                <span className="text-sm font-bold text-muted">No refund remains to claim.</span>
-              )}
-            </div>
-          ) : null}
-        </div>
       </section>
 
       {walletOpen ? (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/75 px-4 py-6">
-          <div className="max-h-[calc(100vh-3rem)] w-full max-w-4xl overflow-y-auto border border-line bg-ink p-4 shadow-2xl sm:p-5">
-            <div className="mb-5 flex items-start justify-between gap-4 border-b border-line pb-5">
-              <div>
-                <p className="mb-3 inline-flex items-center gap-2 text-sm font-bold uppercase tracking-[0.16em] text-muted">
-                  <Wallet size={16} className="text-pink" />
-                  Wallet tools
-                </p>
-                <h2 className="font-display text-3xl font-bold text-text sm:text-4xl">Receive and send tokens.</h2>
-                <p className="mt-3 break-all font-mono text-sm font-bold text-muted">
-                  {walletAddress || "Wallet pending"}
-                </p>
-              </div>
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/75 sm:items-center sm:p-6">
+          <div
+            className="max-h-[calc(100dvh-0.75rem)] w-full max-w-[440px] overflow-y-auto rounded-t-[24px] border border-line bg-ink px-5 pt-5 shadow-2xl sm:rounded-[24px]"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="wallet-modal-title"
+            style={{ paddingBottom: "max(1.75rem, env(safe-area-inset-bottom))" }}
+          >
+            <div className="mb-4 flex items-center justify-between gap-4">
+              <h2 id="wallet-modal-title" className="font-display text-xl font-bold text-text">
+                Wallet
+              </h2>
               <button
-                className="grid h-10 w-10 shrink-0 place-items-center border border-line text-muted transition hover:border-pink hover:text-pink"
+                className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-line bg-surface text-muted transition hover:border-pink hover:text-pink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink"
                 type="button"
                 onClick={() => setWalletOpen(false)}
-                aria-label="Close wallet tools"
+                aria-label="Close wallet"
               >
                 <X size={18} />
               </button>
             </div>
 
-            <div className="mb-5">
-              <div className="grid grid-cols-3 border border-line bg-surface">
-              <div className="min-w-0 border-r border-line px-2 py-4 text-center sm:px-4">
-                <p className="text-xs font-bold uppercase tracking-[0.13em] text-mutedFaint">Selected token</p>
-                <label className="mt-2 flex min-w-0 cursor-pointer items-center justify-center gap-2 sm:gap-3">
-                  <TokenLogo token={sendForm.token} />
-                  <select
-                    aria-label="Selected token"
-                    className="min-w-0 max-w-full cursor-pointer bg-transparent py-1 font-mono text-base font-bold text-text outline-none sm:text-2xl"
-                    value={sendForm.token}
-                    onChange={(event) => setSendForm({ ...sendForm, token: event.target.value })}
-                  >
-                    {TOKEN_OPTIONS.map((token) => (
-                      <option key={token} value={token}>
-                        {token}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-              <div className="min-w-0 border-r border-line px-2 py-4 text-center sm:px-4">
-                <p className="text-xs font-bold uppercase tracking-[0.13em] text-mutedFaint">Available balance</p>
-                <p className="mt-2 break-words font-mono text-base font-bold text-gold sm:text-2xl">
-                  {walletBalancesLoading ? "Loading..." : selectedTokenBalanceLabel}
-                </p>
-              </div>
-              <div className="min-w-0 px-2 py-4 text-center sm:px-4">
-                <p className="text-xs font-bold uppercase tracking-[0.13em] text-mutedFaint">Wallet</p>
-                <p className="mt-2 truncate font-mono text-xs font-bold text-muted sm:text-sm">
-                  {walletAddress ? truncateAddress(walletAddress) : "Pending"}
-                </p>
-              </div>
-              </div>
-              {walletBalancesError ? (
-                <p className="border-x border-b border-line bg-surface px-3 py-2 text-center text-xs leading-5 text-muted">
-                  {walletBalancesError}
-                </p>
-              ) : null}
-            </div>
-
-            <div className="mb-5 grid grid-cols-2 rounded-full border border-line p-1" role="tablist" aria-label="Wallet tools">
+            <div className="mb-[18px] grid grid-cols-2 rounded-full border border-line bg-surface p-1" role="tablist" aria-label="Wallet tools">
               <button
-                className={`h-10 rounded-full text-xs font-bold uppercase tracking-[0.13em] transition ${
-                  walletToolTab === "receive" ? "bg-[#ec4899] text-white" : "text-muted hover:text-text"
-                }`}
-                type="button"
-                id="wallet-tools-receive-tab"
-                role="tab"
-                aria-selected={walletToolTab === "receive"}
-                aria-controls="wallet-tools-receive-panel"
-                onClick={() => setWalletToolTab("receive")}
-              >
-                Receive
-              </button>
-              <button
-                className={`h-10 rounded-full text-xs font-bold uppercase tracking-[0.13em] transition ${
-                  walletToolTab === "send" ? "bg-[#ec4899] text-white" : "text-muted hover:text-text"
+                className={`h-11 rounded-full text-sm font-bold transition ${
+                  walletToolTab === "send" ? "bg-pink text-white" : "text-muted hover:text-text"
                 }`}
                 type="button"
                 id="wallet-tools-send-tab"
@@ -2921,46 +2765,167 @@ function ProfilePage({
               >
                 Send
               </button>
+              <button
+                className={`h-11 rounded-full text-sm font-bold transition ${
+                  walletToolTab === "receive" ? "bg-pink text-white" : "text-muted hover:text-text"
+                }`}
+                type="button"
+                id="wallet-tools-receive-tab"
+                role="tab"
+                aria-selected={walletToolTab === "receive"}
+                aria-controls="wallet-tools-receive-panel"
+                onClick={() => setWalletToolTab("receive")}
+              >
+                Receive
+              </button>
             </div>
 
-            <div className="h-[230px] overflow-y-auto">
-            {walletToolTab === "receive" ? (
-              <div id="wallet-tools-receive-panel" className="wallet-tab-panel space-y-4 border border-line bg-surface p-4" role="tabpanel" aria-labelledby="wallet-tools-receive-tab">
-                <div>
-                  <p className="text-xs font-bold uppercase tracking-[0.13em] text-mutedFaint">Receive</p>
-                  <p className="mt-2 text-sm leading-6 text-muted">Use this address to receive supported tokens.</p>
+            {walletToolTab === "send" ? (
+              <form
+                id="wallet-tools-send-panel"
+                className="wallet-tab-panel"
+                role="tabpanel"
+                aria-labelledby="wallet-tools-send-tab"
+                onSubmit={handleSendToken}
+              >
+                <div className="mb-4 flex min-h-[58px] items-center gap-2 rounded-[14px] border border-line bg-surface px-3">
+                  <TokenLogo token={sendForm.token} />
+                  <label className="sr-only" htmlFor="wallet-token">
+                    Token
+                  </label>
+                  <div className="relative min-w-0 flex-1">
+                    <select
+                      id="wallet-token"
+                      className="h-12 w-full min-w-0 cursor-pointer appearance-none bg-transparent pr-6 font-mono text-xs font-bold text-text outline-none min-[380px]:text-sm"
+                      value={sendForm.token}
+                      onChange={(event) => {
+                        setSendForm((current) => ({ ...current, token: event.target.value, amount: "" }));
+                        setSendTouched((current) => ({ ...current, amount: false }));
+                        setWalletError("");
+                        setWalletStatus("");
+                        setWalletTransaction(null);
+                      }}
+                    >
+                      {TOKEN_OPTIONS.map((token) => (
+                        <option key={token} value={token}>
+                          {token}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronsUpDown className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 text-muted" size={15} />
+                  </div>
+                  <div className="w-[5.5rem] min-w-0 shrink-0 text-right text-xs leading-5 text-muted min-[380px]:w-auto min-[380px]:max-w-[9rem]">
+                    <span className="block">Balance</span>
+                    <strong className="block truncate font-mono text-xs text-text min-[380px]:text-sm">
+                      {walletBalancesLoading
+                        ? "Loading..."
+                        : selectedTokenBalance === "Unavailable"
+                          ? "Unavailable"
+                          : (
+                            <>
+                              {formatTokenBalance(selectedTokenBalance)}
+                              <span className="hidden min-[380px]:inline"> {sendForm.token}</span>
+                            </>
+                          )}
+                    </strong>
+                  </div>
                 </div>
-                <div className="break-all border border-line bg-ink px-3 py-3 font-mono text-sm font-bold text-text">
-                  {walletAddress || "Wallet pending"}
-                </div>
-                <button
-                  className={`inline-flex h-11 w-full items-center justify-center gap-2 border text-sm font-bold transition disabled:cursor-not-allowed disabled:text-mutedFaint ${
-                    addressCopied ? "border-lime text-lime" : "border-line text-text hover:border-pink hover:text-pink"
-                  }`}
-                  type="button"
-                  onClick={handleCopyAddress}
-                  disabled={!walletAddress}
-                  aria-live="polite"
-                >
-                  {addressCopied ? <Check size={16} /> : <Copy size={16} />}
-                  {addressCopied ? "Copied" : "Copy address"}
-                </button>
-              </div>
-            ) : (
 
-              <form id="wallet-tools-send-panel" className="wallet-tab-panel space-y-4 border border-line bg-surface p-4" role="tabpanel" aria-labelledby="wallet-tools-send-tab" onSubmit={handleSendToken}>
-                <div>
-                  <p className="text-xs font-bold uppercase tracking-[0.13em] text-mutedFaint">Send</p>
-                  <p className="mt-2 text-sm leading-6 text-muted">Enter a recipient address and token amount.</p>
+                {walletBalancesError ? (
+                  <p className="mb-4 text-xs leading-5 text-muted" role="status">
+                    {walletBalancesError}
+                  </p>
+                ) : null}
+
+                <div className="mb-4">
+                  <label className="mb-1.5 block text-sm font-bold text-muted" htmlFor="wallet-recipient">
+                    Send to
+                  </label>
+                  <div
+                    className={`flex h-[52px] items-center gap-2 rounded-[14px] border bg-surface px-3 transition focus-within:border-pink focus-within:ring-4 focus-within:ring-pink/10 ${
+                      recipientError ? "border-pink" : "border-line"
+                    }`}
+                  >
+                    <input
+                      id="wallet-recipient"
+                      className="min-w-0 flex-1 bg-transparent font-mono text-base text-text outline-none placeholder:text-mutedFaint"
+                      placeholder="0x... wallet address"
+                      autoComplete="off"
+                      spellCheck="false"
+                      inputMode="text"
+                      value={sendForm.recipient}
+                      aria-invalid={Boolean(recipientError)}
+                      aria-describedby={recipientError ? "wallet-recipient-error" : undefined}
+                      onBlur={() => setSendTouched((current) => ({ ...current, recipient: true }))}
+                      onChange={(event) => {
+                        setSendForm((current) => ({ ...current, recipient: event.target.value }));
+                        setSendTouched((current) => ({ ...current, recipient: true }));
+                        setWalletError("");
+                        setWalletStatus("");
+                        setWalletTransaction(null);
+                      }}
+                    />
+                    <button
+                      className="shrink-0 rounded-lg bg-raised px-3 py-1.5 text-xs font-bold text-pink transition hover:bg-pink/15"
+                      type="button"
+                      onClick={handlePasteRecipient}
+                    >
+                      Paste
+                    </button>
+                  </div>
+                  <p id="wallet-recipient-error" className={`mt-1.5 min-h-[20px] text-xs ${recipientError ? "text-pink" : "text-muted"}`} role={recipientError ? "alert" : undefined}>
+                    {recipientError}
+                  </p>
+                </div>
+
+                <div className="mb-4">
+                  <label className="mb-1.5 block text-sm font-bold text-muted" htmlFor="wallet-amount">
+                    Amount
+                  </label>
+                  <div
+                    className={`flex h-[52px] items-center gap-2 rounded-[14px] border bg-surface px-3 transition focus-within:border-pink focus-within:ring-4 focus-within:ring-pink/10 ${
+                      amountError ? "border-pink" : "border-line"
+                    }`}
+                  >
+                    <input
+                      id="wallet-amount"
+                      className="min-w-0 flex-1 bg-transparent font-mono text-base text-text outline-none placeholder:text-mutedFaint"
+                      placeholder="0.00"
+                      inputMode="decimal"
+                      autoComplete="off"
+                      value={sendForm.amount}
+                      aria-invalid={Boolean(amountError)}
+                      aria-describedby={amountError ? "wallet-amount-error" : undefined}
+                      onBlur={() => setSendTouched((current) => ({ ...current, amount: true }))}
+                      onChange={(event) => {
+                        setSendForm((current) => ({ ...current, amount: event.target.value }));
+                        setSendTouched((current) => ({ ...current, amount: true }));
+                        setWalletError("");
+                        setWalletStatus("");
+                        setWalletTransaction(null);
+                      }}
+                    />
+                    <button
+                      className="shrink-0 rounded-lg bg-raised px-3 py-1.5 text-xs font-bold text-pink transition hover:bg-pink/15 disabled:cursor-not-allowed disabled:text-mutedFaint"
+                      type="button"
+                      onClick={handleMaxAmount}
+                      disabled={!selectedBalanceReady}
+                    >
+                      Max
+                    </button>
+                  </div>
+                  <p id="wallet-amount-error" className={`mt-1.5 min-h-[20px] text-xs ${amountError ? "text-pink" : "text-muted"}`} role={amountError ? "alert" : undefined}>
+                    {amountError}
+                  </p>
                 </div>
 
                 {walletError ? (
-                  <div className="border border-pink/50 bg-pink/10 px-3 py-2 text-sm font-bold text-pink">
+                  <p className="mb-3 text-sm font-bold leading-5 text-pink" role="alert">
                     {walletError}
-                  </div>
+                  </p>
                 ) : null}
                 {walletStatus ? (
-                  <div className="border border-line bg-ink px-3 py-2 text-sm font-bold text-muted">
+                  <p className="mb-3 text-sm font-bold leading-5 text-muted" role="status">
                     {walletStatus}
                     {walletTransaction?.explorerUrl ? (
                       <a
@@ -2972,60 +2937,54 @@ function ProfilePage({
                         View transaction
                       </a>
                     ) : null}
-                  </div>
+                  </p>
                 ) : null}
 
-                <Field label="Recipient wallet">
-                  <input
-                    className="h-11 w-full border border-line bg-ink px-3 font-mono text-sm text-text placeholder:text-mutedFaint"
-                    placeholder="0x..."
-                    value={sendForm.recipient}
-                    onChange={(event) => setSendForm({ ...sendForm, recipient: event.target.value })}
-                  />
-                </Field>
-
-                <div className="grid gap-3 sm:grid-cols-[1fr_10rem]">
-                  <Field label="Amount">
-                    <input
-                      className="h-11 w-full border border-line bg-ink px-3 font-mono text-sm text-text placeholder:text-mutedFaint"
-                      min="0"
-                      step="any"
-                      type="number"
-                      value={sendForm.amount}
-                      onChange={(event) => setSendForm({ ...sendForm, amount: event.target.value })}
-                    />
-                  </Field>
-                  <Field label="Token">
-                    <div className="flex h-11 items-center border border-line bg-ink">
-                      <div className="pl-3">
-                        <TokenLogo token={sendForm.token} size="sm" />
-                      </div>
-                      <select
-                        className="h-full min-w-0 flex-1 bg-transparent px-3 font-mono text-sm text-text outline-none"
-                        value={sendForm.token}
-                        onChange={(event) => setSendForm({ ...sendForm, token: event.target.value })}
-                      >
-                        {TOKEN_OPTIONS.map((token) => (
-                          <option key={token} value={token}>
-                            {token}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </Field>
-                </div>
-
                 <button
-                  className="inline-flex h-11 w-full items-center justify-center gap-2 bg-pink text-sm font-bold text-ink transition hover:bg-text disabled:cursor-not-allowed disabled:bg-raised disabled:text-muted"
+                  className="inline-flex h-[54px] w-full items-center justify-center gap-2 bg-pink px-5 text-base font-bold text-white transition hover:bg-pink/90 disabled:cursor-not-allowed disabled:bg-line disabled:text-muted"
                   type="submit"
-                  disabled={!connected || !wallet || walletSending || selectedTokenBalance === "Unavailable"}
+                  disabled={!sendFormValid || walletSending}
+                  aria-live="polite"
                 >
-                  <Send size={16} />
-                  {walletSending ? "Sending..." : "Send tokens"}
+                  {walletSending ? <LoaderCircle className="animate-spin" size={18} /> : null}
+                  {sendButtonLabel}
                 </button>
               </form>
+            ) : (
+              <div
+                id="wallet-tools-receive-panel"
+                className="wallet-tab-panel"
+                role="tabpanel"
+                aria-labelledby="wallet-tools-receive-tab"
+              >
+                <div className="mb-4 rounded-[14px] border border-line bg-surface p-4">
+                  <p className="mb-2 text-sm font-bold text-muted">Your wallet address</p>
+                  <p className="break-all font-mono text-sm leading-6 text-text">
+                    {walletAddress || "Wallet pending"}
+                  </p>
+                </div>
+                {copyError ? (
+                  <p className="mb-3 text-sm font-bold leading-5 text-pink" role="alert">
+                    {copyError}
+                  </p>
+                ) : null}
+                <button
+                  className={`inline-flex h-[54px] w-full items-center justify-center gap-2 text-base font-bold text-white transition disabled:cursor-not-allowed disabled:bg-line disabled:text-muted ${
+                    addressCopied ? "bg-lime" : "bg-pink hover:bg-pink/90"
+                  }`}
+                  type="button"
+                  onClick={handleCopyAddress}
+                  disabled={!walletAddress}
+                  aria-live="polite"
+                >
+                  {addressCopied ? <Check size={18} /> : <Copy size={18} />}
+                  {addressCopied ? "Copied" : "Copy address"}
+                </button>
+                <p className="mt-3 text-xs leading-5 text-muted">
+                  Only send supported tokens on Robinhood Chain. Tokens sent on another network may not be recoverable.
+                </p>
+              </div>
             )}
-            </div>
           </div>
         </div>
       ) : null}

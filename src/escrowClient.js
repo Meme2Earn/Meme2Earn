@@ -47,21 +47,14 @@ const ERC20_ABI = [
 ];
 
 const ESCROW_ABI = [
-  "event EscrowCreated(bytes32 indexed bountyId,address indexed creator,address indexed token,uint256 targetAmount,uint64 deadline,uint8 fundingType,uint8 winnerSelection)",
   "function createEscrow(bytes32 bountyId,address token,uint256 targetAmount,uint64 deadline,uint8 fundingType,uint8 winnerSelection,uint256 initialAmount) external",
   "function escrows(bytes32 bountyId) view returns (address creator,address token,uint256 targetAmount,uint256 fundedAmount,uint64 deadline,uint64 refundDelay,uint8 fundingType,uint8 winnerSelection,uint8 status,address winner)",
-  "function contributions(bytes32 bountyId,address contributor) view returns (uint256)",
-  "function cancel(bytes32 bountyId) external",
-  "function cancelExpiredUnfinalized(bytes32 bountyId) external",
-  "function refund(bytes32 bountyId) external",
   "function feeRecipient() view returns (address)",
   "function fund(bytes32 bountyId,uint256 amount) external",
   "function finalize(bytes32 bountyId,address winner) external",
   "function paused() view returns (bool)",
   "function supportedTokens(address token) view returns (bool)",
 ];
-
-const ESCROW_STATUS_LABELS = ["Missing", "Open", "Funded", "Finalized", "Cancelled"];
 
 function requireEscrowAddress() {
   if (!DARE_ESCROW_ADDRESS) {
@@ -287,128 +280,6 @@ export async function createBountyEscrow({ bounty, wallet }) {
     escrowStatus: isSelfFunded ? "Funded" : "Open",
     escrowTxHash: receipt?.hash || tx.hash,
   };
-}
-
-export async function inspectEscrowTransaction({ transactionHash, walletAddress }) {
-  requireEscrowAddress();
-  if (!ethers.isHexString(transactionHash, 32)) throw new Error("Enter a valid transaction hash.");
-  if (!ethers.isAddress(walletAddress)) throw new Error("Your connected wallet is not ready yet.");
-
-  const provider = new ethers.JsonRpcProvider(ROBINHOOD_TESTNET.rpcUrls[0], ROBINHOOD_TESTNET.chainId);
-  const receipt = await provider.getTransactionReceipt(transactionHash);
-  if (!receipt) throw new Error("That transaction is still pending or could not be found.");
-  if (receipt.status !== 1) throw new Error("That transaction failed and did not create an escrow.");
-
-  const escrow = new ethers.Contract(DARE_ESCROW_ADDRESS, ESCROW_ABI, provider);
-  let createdEvent = null;
-  for (const log of receipt.logs) {
-    if (log.address.toLowerCase() !== DARE_ESCROW_ADDRESS.toLowerCase()) continue;
-    try {
-      const parsed = escrow.interface.parseLog(log);
-      if (parsed?.name === "EscrowCreated") {
-        createdEvent = parsed;
-        break;
-      }
-    } catch {
-      // Ignore unrelated logs emitted during the transaction.
-    }
-  }
-
-  if (!createdEvent) throw new Error("This transaction did not create a Meme2Earn escrow.");
-
-  const escrowBountyId = createdEvent.args.bountyId;
-  const creator = createdEvent.args.creator;
-  if (creator.toLowerCase() !== walletAddress.toLowerCase()) {
-    throw new Error("This escrow belongs to a different creator wallet.");
-  }
-
-  const state = await escrow.escrows(escrowBountyId);
-  const contribution = await escrow.contributions(escrowBountyId, walletAddress);
-  const token = new ethers.Contract(state.token, ERC20_ABI, provider);
-  const decimals = await getTokenDecimals(token);
-  const status = Number(state.status);
-
-  return {
-    transactionHash,
-    escrowBountyId,
-    creator,
-    tokenAddress: state.token,
-    targetAmount: ethers.formatUnits(state.targetAmount, decimals),
-    fundedAmount: ethers.formatUnits(state.fundedAmount, decimals),
-    refundAmount: ethers.formatUnits(contribution, decimals),
-    deadline: Number(state.deadline) * 1000,
-    status,
-    statusLabel: ESCROW_STATUS_LABELS[status] || "Unknown",
-    canRecover: (status === 1 || status === 2 || status === 4) && contribution > 0n,
-  };
-}
-
-export async function cancelAndRefundEscrow({ escrowBountyId, wallet }) {
-  requireEscrowAddress();
-  if (!ethers.isHexString(escrowBountyId, 32)) throw new Error("Escrow id is missing.");
-
-  const signer = await getEscrowSigner(wallet);
-  const signerAddress = await signer.getAddress();
-  const escrow = new ethers.Contract(DARE_ESCROW_ADDRESS, ESCROW_ABI, signer);
-  let state = await escrow.escrows(escrowBountyId);
-  let status = Number(state.status);
-
-  if (state.creator.toLowerCase() !== signerAddress.toLowerCase()) {
-    throw new Error("Only the wallet that created this escrow can recover it.");
-  }
-  if (status === 0) throw new Error("No on-chain escrow exists for this transaction.");
-  if (status === 3) throw new Error("This escrow was finalized and cannot be refunded.");
-
-  let cancelTxHash = "";
-  if (status === 1 || status === 2) {
-    const latestBlock = await signer.provider.getBlock("latest");
-    const now = Number(latestBlock?.timestamp || Math.floor(Date.now() / 1000));
-    const deadline = Number(state.deadline);
-    const refundAvailableAt = deadline + Number(state.refundDelay);
-
-    try {
-      const cancelTx =
-        now < deadline
-          ? await escrow.cancel(escrowBountyId)
-          : now >= refundAvailableAt
-            ? await escrow.cancelExpiredUnfinalized(escrowBountyId)
-            : null;
-
-      if (!cancelTx) {
-        throw new Error(`Refund recovery opens on ${new Date(refundAvailableAt * 1000).toLocaleString()}.`);
-      }
-      const cancelReceipt = await cancelTx.wait();
-      if (!cancelReceipt || cancelReceipt.status !== 1) throw new Error("Escrow cancellation failed.");
-      cancelTxHash = cancelReceipt.hash || cancelTx.hash;
-      status = 4;
-    } catch (error) {
-      if (error?.code === 4001 || error?.code === "ACTION_REJECTED") {
-        throw new Error("Escrow cancellation was cancelled in your wallet.");
-      }
-      if (error?.message?.startsWith("Refund recovery opens")) throw error;
-      throw new Error(error?.shortMessage || "The escrow could not be cancelled.");
-    }
-  }
-
-  if (status !== 4) throw new Error("This escrow is not ready for a refund.");
-  const contribution = await escrow.contributions(escrowBountyId, signerAddress);
-  if (contribution <= 0n) throw new Error("This wallet has no remaining refund to claim.");
-
-  try {
-    const refundTx = await escrow.refund(escrowBountyId);
-    const refundReceipt = await refundTx.wait();
-    if (!refundReceipt || refundReceipt.status !== 1) throw new Error("Refund transaction failed.");
-    return {
-      cancelTxHash,
-      refundTxHash: refundReceipt.hash || refundTx.hash,
-      refundedAmount: contribution,
-    };
-  } catch (error) {
-    if (error?.code === 4001 || error?.code === "ACTION_REJECTED") {
-      throw new Error("Refund claim was cancelled in your wallet. The escrow is cancelled, so you can retry the claim.");
-    }
-    throw new Error(error?.shortMessage || "The refund could not be claimed.");
-  }
 }
 
 export async function fundBountyEscrow({ amount: displayAmount, bounty, wallet }) {
