@@ -1733,8 +1733,6 @@ function ExplorePage({
 }
 
 function M2ETVPage({ items, onCreate, onOpenBounty }) {
-  const totalRewards = items.reduce((sum, item) => sum + (Number(item.bounty?.reward) || 0), 0);
-
   return (
     <section className="space-y-8">
       <div className="grid gap-8 border-b border-line pb-8 lg:grid-cols-[1fr_0.8fr] lg:items-end">
@@ -1749,10 +1747,6 @@ function M2ETVPage({ items, onCreate, onOpenBounty }) {
           <p className="mt-6 max-w-2xl text-lg leading-8 text-muted">
             Scroll through video submissions from meme bounty hunters across the platform.
           </p>
-        </div>
-        <div className="ui-card grid grid-cols-1 overflow-hidden border border-line bg-surface min-[420px]:grid-cols-2">
-          <Stat label="Videos" value={items.length} />
-          <Stat label="Rewards shown" value={totalRewards ? formatReward(totalRewards) : 0} />
         </div>
       </div>
 
@@ -1962,7 +1956,7 @@ function CreatePage({ bountySyncStatus, errors, form, onChange, onImageChange, o
           ) : null}
         </div>
 
-        <div className="grid grid-cols-1 gap-4 min-[540px]:grid-cols-2">
+        <div className="grid grid-cols-2 gap-6">
           <Field label="Category">
             <select
               className="h-11 w-full rounded-full border border-[#F4B6D7] bg-white px-4 text-sm text-text"
