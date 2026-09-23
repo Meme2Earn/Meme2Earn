@@ -1964,10 +1964,10 @@ function CreatePage({ bountySyncStatus, errors, form, onChange, onImageChange, o
           ) : null}
         </div>
 
-        <div className="flex gap-6">
-          <Field label="Category" className="min-w-0 flex-1">
+        <div className="grid grid-cols-2 gap-6">
+          <Field label="Category">
             <select
-              className="form-pill-value h-11 min-w-0 w-full rounded-full border border-[#F4B6D7] bg-white px-4 text-left text-sm text-text"
+              className="form-pill-value h-11 w-full rounded-full border border-[#F4B6D7] bg-white px-4 text-left text-sm text-text"
               value={form.category}
               onChange={(event) => onChange({ ...form, category: event.target.value })}
             >
@@ -1976,10 +1976,10 @@ function CreatePage({ bountySyncStatus, errors, form, onChange, onImageChange, o
               ))}
             </select>
           </Field>
-          <Field label="Deadline" className="min-w-0 flex-1">
-            <div className="relative min-w-0">
+          <Field label="Deadline">
+            <div className="relative">
               <input
-                className="date-pill form-pill-value h-11 min-w-0 w-full rounded-full border border-[#F4B6D7] bg-white px-4 pr-11 text-left font-mono text-sm text-text"
+                className="date-pill form-pill-value h-11 w-full rounded-full border border-[#F4B6D7] bg-white px-4 pr-11 text-left font-mono text-sm text-text"
                 type="date"
                 value={form.deadline}
                 onChange={(event) => onChange({ ...form, deadline: event.target.value })}
@@ -3566,9 +3566,9 @@ function StatusPill({ status }) {
   );
 }
 
-function Field({ label, error, children, className = "" }) {
+function Field({ label, error, children }) {
   return (
-    <label className={`block ${className}`}>
+    <label className="block">
       <span className="mb-2 block text-xs font-bold uppercase tracking-[0.13em] text-muted">{label}</span>
       {children}
       {error && <span className="mt-2 block text-sm text-pink">{error}</span>}
