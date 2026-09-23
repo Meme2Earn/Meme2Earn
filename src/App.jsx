@@ -1824,7 +1824,7 @@ function CreatePage({ bountySyncStatus, errors, form, onChange, onImageChange, o
   const [imageDragging, setImageDragging] = useState(false);
 
   return (
-    <section className="grid gap-8 lg:grid-cols-[0.85fr_1.15fr]">
+    <section className="mx-auto grid w-full max-w-6xl gap-8 lg:grid-cols-[0.85fr_1.15fr]">
       <div className="border-b border-line pb-8 lg:border-b-0 lg:border-r lg:pr-8">
         <p className="mb-4 inline-flex items-center gap-2 text-sm font-bold uppercase tracking-[0.16em] text-muted">
           <LayoutDashboard size={16} className="text-pink" />
@@ -1964,29 +1964,33 @@ function CreatePage({ bountySyncStatus, errors, form, onChange, onImageChange, o
           ) : null}
         </div>
 
-        <div className="grid grid-cols-2 gap-6">
-          <Field label="Category">
-            <select
-              className="form-pill-value h-11 w-full rounded-full border border-[#F4B6D7] bg-white px-4 text-left text-sm text-text"
-              value={form.category}
-              onChange={(event) => onChange({ ...form, category: event.target.value })}
-            >
-              {Object.keys(CATEGORY_COLORS).map((category) => (
-                <option key={category}>{category}</option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Deadline">
-            <div className="relative">
-              <input
-                className="date-pill form-pill-value h-11 w-full rounded-full border border-[#F4B6D7] bg-white px-4 pr-11 text-left font-mono text-sm text-text"
-                type="date"
-                value={form.deadline}
-                onChange={(event) => onChange({ ...form, deadline: event.target.value })}
-              />
-              <CalendarDays className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-muted" size={16} aria-hidden="true" />
-            </div>
-          </Field>
+        <div className="flex min-w-0 flex-wrap gap-6">
+          <div className="min-w-0 flex-none">
+            <Field label="Category">
+              <select
+                className="form-pill-value h-11 w-fit min-w-0 max-w-[160px] rounded-full border border-[#F4B6D7] bg-white px-4 text-left text-sm text-text"
+                value={form.category}
+                onChange={(event) => onChange({ ...form, category: event.target.value })}
+              >
+                {Object.keys(CATEGORY_COLORS).map((category) => (
+                  <option key={category}>{category}</option>
+                ))}
+              </select>
+            </Field>
+          </div>
+          <div className="min-w-0 flex-none">
+            <Field label="Deadline">
+              <div className="relative w-fit min-w-0 max-w-[160px]">
+                <input
+                  className="date-pill form-pill-value h-11 w-fit min-w-0 max-w-[160px] rounded-full border border-[#F4B6D7] bg-white px-4 pr-11 text-left font-mono text-sm text-text"
+                  type="date"
+                  value={form.deadline}
+                  onChange={(event) => onChange({ ...form, deadline: event.target.value })}
+                />
+                <CalendarDays className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-muted" size={16} aria-hidden="true" />
+              </div>
+            </Field>
+          </div>
         </div>
 
         <div>
