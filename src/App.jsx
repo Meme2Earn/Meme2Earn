@@ -1977,7 +1977,7 @@ function CreatePage({ bountySyncStatus, errors, form, onChange, onImageChange, o
           </Field>
           <Field label="Deadline">
             <input
-              className="form-pill-value h-11 w-full rounded-full border border-[#F4B6D7] bg-white px-4 text-left font-mono text-sm text-text"
+              className="date-pill form-pill-value h-11 w-full rounded-full border border-[#F4B6D7] bg-white px-4 text-left font-mono text-sm text-text"
               type="date"
               value={form.deadline}
               onChange={(event) => onChange({ ...form, deadline: event.target.value })}

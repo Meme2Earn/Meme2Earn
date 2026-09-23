@@ -70,6 +70,14 @@ select {
   text-align: left;
 }
 
+.date-pill::-webkit-datetime-edit,
+.date-pill::-webkit-datetime-edit-fields-wrapper,
+.date-pill::-webkit-date-and-time-value {
+  margin: 0;
+  padding: 0;
+  text-align: left;
+}
+
 label.inline-flex {
   border-radius: var(--radius-pill);
 }
