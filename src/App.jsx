@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
   CircleAlert,
@@ -419,6 +419,7 @@ function App({ auth }) {
   const [xProfilePrefilled, setXProfilePrefilled] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [accountLoaded, setAccountLoaded] = useState(false);
+  const hasRedirectedAfterLogin = useRef(false);
 
   const walletAddress = wallets?.find((wallet) => wallet.address)?.address || "";
   const selectedWallet = wallets?.find((wallet) => wallet.address === walletAddress) || wallets?.[0] || null;
@@ -601,7 +602,13 @@ function App({ auth }) {
   }, [accountLoaded, authenticated, page, profileComplete, ready, termsAccepted]);
 
   useEffect(() => {
-    if (!ready || !authenticated || !accountLoaded || !profileComplete) return;
+    if (!ready || !authenticated) {
+      hasRedirectedAfterLogin.current = false;
+      return;
+    }
+    if (!accountLoaded || !profileComplete || hasRedirectedAfterLogin.current) return;
+
+    hasRedirectedAfterLogin.current = true;
     if (page === "Landing") setPage("Explore");
   }, [accountLoaded, authenticated, page, profileComplete, ready]);
 
@@ -1981,7 +1988,7 @@ function CreatePage({ bountySyncStatus, errors, form, onChange, onImageChange, o
         <div>
           <div>
             <p className="mb-2 text-xs font-bold uppercase tracking-[0.13em] text-muted">Bounty amount</p>
-            <div className="grid grid-cols-1 gap-3 min-[540px]:grid-cols-2">
+            <div className="grid grid-cols-2 gap-3">
               <input
                 className="h-11 w-full rounded-full border border-[#F4B6D7] bg-white px-4 font-mono text-sm text-text"
                 min={minimumReward}
