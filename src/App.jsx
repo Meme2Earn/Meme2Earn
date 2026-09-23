@@ -69,6 +69,7 @@ const TABS = ["Open", "In Progress", "Completed", "All"];
 const PAGES = ["Explore", "M2E TV", "Create", "Profile"];
 const AUTH_ONLY_PAGES = ["Terms", "SetupProfile", "Profile"];
 const TEST_TOKEN_ADDRESS = import.meta.env.VITE_TEST_TOKEN_ADDRESS || "";
+const X_PROFILE_URL = "https://x.com/trymeme2earn";
 const TOKEN_METADATA = {
   USDG: {
     contract: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
@@ -260,6 +261,19 @@ const profileTerms = [
   "The platform is provided as is and as available, without warranties of merchantability, fitness for a particular purpose, non-infringement, availability, accuracy, security, uninterrupted operation, or error-free performance.",
   "meme2earn may moderate, hide, remove, restrict, or refuse content or accounts at any time if content appears unsafe, unlawful, infringing, deceptive, abusive, spammy, or otherwise unsuitable for the platform.",
   "These terms are a product disclaimer and usage acknowledgement for this prototype. They are not a substitute for legal advice and should be reviewed by qualified counsel before production use.",
+];
+
+const privacyPolicy = [
+  "Meme2Earn uses Privy authentication to identify signed-in users and provision embedded wallets. Privy may process account, device, authentication, and wallet information under its own privacy terms.",
+  "When available from your connected X account, Meme2Earn uses your X username and profile image to create your public platform profile.",
+  "Profile details, dare campaigns, joins, votes, and submissions may be stored in Supabase. Uploaded campaign images and submission videos may be publicly accessible so they can be displayed on the platform.",
+  "Wallet addresses and blockchain transactions are public by nature. Transfers, escrow funding, rewards, and related activity may remain permanently visible on the relevant blockchain and block explorers.",
+  "Meme2Earn does not ask for or store your wallet private keys or recovery phrase. Never share those credentials through a profile, dare, submission, or support message.",
+  "Technical logs may include browser, device, network, error, and usage information needed to secure, maintain, and improve the service.",
+  "Do not upload personal or confidential information in public content. You are responsible for ensuring that submitted media can lawfully be published and processed.",
+  "Data may be retained while an account or campaign remains active and for a reasonable period afterward for security, dispute resolution, legal compliance, and platform integrity.",
+  "Third-party services, linked websites, token issuers, wallets, and blockchain networks operate under their own policies. Meme2Earn is not responsible for their privacy or security practices.",
+  "This policy may be updated as the product and its service providers change. Continued use after an update means the revised policy applies to subsequent activity.",
 ];
 
 function formatReward(value) {
@@ -1330,9 +1344,10 @@ function App({ auth }) {
             bounties={bounties}
             bountiesLoading={bountiesLoading}
             stats={stats}
-            onCreate={() => setPage("Create")}
             onLogin={handleLoginClick}
             onExplore={() => setPage("Explore")}
+            onPrivacy={() => setPage("PrivacyPolicy")}
+            onTerms={() => setPage("TermsAndConditions")}
           />
         )}
 
@@ -1414,6 +1429,26 @@ function App({ auth }) {
           />
         )}
 
+        {page === "PrivacyPolicy" && (
+          <LegalDocumentPage
+            eyebrow="Privacy policy"
+            title="How Meme2Earn handles data."
+            introduction="This policy explains what information the platform uses, where it may be stored, and what remains public when you use wallets and onchain features."
+            items={privacyPolicy}
+            onBack={() => setPage("Landing")}
+          />
+        )}
+
+        {page === "TermsAndConditions" && (
+          <LegalDocumentPage
+            eyebrow="Terms and conditions"
+            title="Terms for using Meme2Earn."
+            introduction="These terms describe your responsibilities and the risks of using token-funded dares, public submissions, wallets, and experimental platform features."
+            items={profileTerms}
+            onBack={() => setPage("Landing")}
+          />
+        )}
+
         {page === "SetupProfile" && (
           <SetupProfilePage
             profile={effectiveProfile}
@@ -1451,7 +1486,7 @@ function App({ auth }) {
   );
 }
 
-function LandingPage({ bounties, bountiesLoading, stats, onCreate, onExplore, onLogin }) {
+function LandingPage({ bounties, bountiesLoading, stats, onExplore, onLogin, onPrivacy, onTerms }) {
   const featured = bounties.slice(0, 3);
   const steps = [
     {
@@ -1629,12 +1664,19 @@ function LandingPage({ bounties, bountiesLoading, stats, onCreate, onExplore, on
               Meme2Earn is a bounty interface for token-funded creative dares. Rewards, balances, and submissions are user-generated and should be verified before use.
             </p>
           </div>
-          <div className="grid gap-4 text-sm font-bold text-muted sm:grid-cols-3 md:text-right">
-            <button className="transition hover:text-pink" type="button" onClick={onExplore}>Explore</button>
-            <button className="transition hover:text-pink" type="button" onClick={onCreate}>Create</button>
-            <a className="transition hover:text-pink" href="https://github.com/Meme2Earn/Meme2Earn" target="_blank" rel="noreferrer">
-              GitHub
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-4 text-sm font-bold text-muted md:justify-end">
+            <a
+              className="inline-flex h-10 w-10 items-center justify-center border border-line transition hover:border-pink hover:text-pink"
+              href={X_PROFILE_URL}
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Meme2Earn on X"
+              title="Meme2Earn on X"
+            >
+              <X size={18} strokeWidth={2.5} />
             </a>
+            <button className="transition hover:text-pink" type="button" onClick={onPrivacy}>Privacy policy</button>
+            <button className="transition hover:text-pink" type="button" onClick={onTerms}>Terms and conditions</button>
           </div>
         </div>
         <div className="mt-8 flex flex-col gap-2 border-t border-line pt-5 text-xs font-bold uppercase tracking-[0.13em] text-mutedFaint sm:flex-row sm:items-center sm:justify-between">
@@ -2051,6 +2093,35 @@ function CreatePage({ bountySyncStatus, errors, form, onChange, onImageChange, o
           Submit bounty
         </button>
       </form>
+    </section>
+  );
+}
+
+function LegalDocumentPage({ eyebrow, introduction, items, onBack, title }) {
+  return (
+    <section className="mx-auto w-full max-w-3xl">
+      <div className="border-b border-line pb-8">
+        <p className="mb-4 text-sm font-bold uppercase tracking-[0.16em] text-pink">{eyebrow}</p>
+        <h1 className="font-display text-4xl font-bold leading-tight text-text sm:text-6xl">{title}</h1>
+        <p className="mt-5 max-w-2xl text-base leading-7 text-muted">{introduction}</p>
+      </div>
+
+      <div className="mt-8 space-y-4 border-b border-line pb-8 text-sm leading-7 text-muted">
+        {items.map((item, index) => (
+          <div className="flex items-start gap-4" key={item}>
+            <span className="mt-0.5 shrink-0 font-mono text-xs font-bold text-mutedFaint">{String(index + 1).padStart(2, "0")}</span>
+            <p>{item}</p>
+          </div>
+        ))}
+      </div>
+
+      <button
+        className="mt-8 inline-flex h-11 items-center justify-center border border-line px-5 text-sm font-bold text-text transition hover:border-pink hover:text-pink"
+        type="button"
+        onClick={onBack}
+      >
+        Back to home
+      </button>
     </section>
   );
 }
