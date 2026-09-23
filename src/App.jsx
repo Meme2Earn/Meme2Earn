@@ -1959,7 +1959,7 @@ function CreatePage({ bountySyncStatus, errors, form, onChange, onImageChange, o
         <div className="grid grid-cols-2 gap-6">
           <Field label="Category">
             <select
-              className="h-11 w-full rounded-full border border-[#F4B6D7] bg-white px-4 text-sm text-text"
+              className="form-pill-value h-11 w-full rounded-full border border-[#F4B6D7] bg-white px-4 text-left text-sm text-text"
               value={form.category}
               onChange={(event) => onChange({ ...form, category: event.target.value })}
             >
@@ -1970,7 +1970,7 @@ function CreatePage({ bountySyncStatus, errors, form, onChange, onImageChange, o
           </Field>
           <Field label="Deadline">
             <input
-              className="h-11 w-full rounded-full border border-[#F4B6D7] bg-white px-4 font-mono text-sm text-text"
+              className="form-pill-value h-11 w-full rounded-full border border-[#F4B6D7] bg-white px-4 text-left font-mono text-sm text-text"
               type="date"
               value={form.deadline}
               onChange={(event) => onChange({ ...form, deadline: event.target.value })}

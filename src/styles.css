@@ -62,6 +62,14 @@ select {
   border-radius: var(--radius-control);
 }
 
+.form-pill-value {
+  text-align: left;
+}
+
+.form-pill-value[type="date"]::-webkit-datetime-edit {
+  text-align: left;
+}
+
 label.inline-flex {
   border-radius: var(--radius-pill);
 }
